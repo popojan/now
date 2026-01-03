@@ -41,7 +41,7 @@ def parse_timestamp(timestamp_str):
     raise ValueError(f"Cannot parse timestamp: {timestamp_str}")
 
 
-def compute_clock_origin(video_timestamp, rotation_offset, k):
+def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_offset_ms=None):
     """
     Compute when the clock was originally started.
 
@@ -49,18 +49,36 @@ def compute_clock_origin(video_timestamp, rotation_offset, k):
         video_timestamp: datetime when video was filmed
         rotation_offset: which second (0-59) the video started at
         k: the minute identifier recovered from inversion
+        minute_boundary_offset_ms: if available, precise offset from video start to minute boundary
 
     Returns:
-        datetime of clock origin (epoch)
+        (clock_origin datetime, sub_second_offset_ms for precision indication)
     """
-    # The video starts at second `rotation_offset` of some minute
-    # First, find the start of that minute
-    video_minute_start = video_timestamp - timedelta(seconds=rotation_offset)
+    if minute_boundary_offset_ms is not None:
+        # Use precise minute boundary from second 0 detection
+        minute_start = video_timestamp + timedelta(milliseconds=minute_boundary_offset_ms)
+        # Track sub-second precision for display
+        sub_second_ms = minute_boundary_offset_ms % 1000
+        if sub_second_ms > 500:
+            sub_second_ms -= 1000  # Normalize to -500 to +500
+    else:
+        # Fallback: estimate from rotation offset
+        minute_start = video_timestamp - timedelta(seconds=rotation_offset)
+        sub_second_ms = 0
 
     # The clock has been running for k minutes since epoch
-    clock_origin = video_minute_start - timedelta(minutes=k)
+    clock_origin = minute_start - timedelta(minutes=k)
 
-    return clock_origin
+    # Round to nearest second if sub-second offset is significant
+    if abs(sub_second_ms) >= 400:
+        # Round to nearest second
+        if sub_second_ms > 0:
+            clock_origin = clock_origin + timedelta(milliseconds=1000 - sub_second_ms)
+        else:
+            clock_origin = clock_origin - timedelta(milliseconds=abs(sub_second_ms))
+        sub_second_ms = 0
+
+    return clock_origin, sub_second_ms
 
 
 def main():
@@ -130,6 +148,15 @@ def main():
 
     print(f"Extracted {len(observations)} seconds of cell observations")
 
+    # Report corrections
+    if metadata.get('corrected_frames', 0) > 0:
+        print(f"  ({metadata['corrected_frames']} frames corrected via error detection)")
+
+    # Get minute boundary offset (if second 0 was found)
+    minute_boundary_offset_ms = metadata.get('minute_boundary_offset_ms')
+    if minute_boundary_offset_ms is not None:
+        print(f"  Minute boundary: {minute_boundary_offset_ms}ms after video start")
+
     if args.verbose:
         print("\nFirst 5 observations:")
         for i, obs in enumerate(observations[:5]):
@@ -196,7 +223,7 @@ def main():
             print("  Warning: Low cross-validation match rate", file=sys.stderr)
 
     # Compute origin
-    clock_origin = compute_clock_origin(video_timestamp, rotation, k)
+    clock_origin, sub_second_ms = compute_clock_origin(video_timestamp, rotation, k, minute_boundary_offset_ms)
 
     # Compute elapsed time
     seconds_elapsed = k * 60 + rotation
@@ -220,7 +247,10 @@ def main():
     else:
         clock_origin_utc = clock_origin
     print(f"\nClock origin (UTC):")
-    print(f"  {format_timestamp(clock_origin_utc)}")
+    if sub_second_ms != 0:
+        print(f"  {format_timestamp(clock_origin_utc)} ({sub_second_ms:+d}ms)")
+    else:
+        print(f"  {format_timestamp(clock_origin_utc)}")
 
     print(f"\nNote: The clock period is {PERIOD:,} minutes")
     print(f"      (>{PERIOD / (60 * 24 * 365.25) / 1e9:.0f} billion years)")

@@ -74,11 +74,64 @@ ORDERING = {
     59: [[2, 4, 6, 12, 15, 20]],
 }
 
+# Cell values (areas)
+CELL_VALUES = [1, 2, 4, 6, 12, 15, 20]
+
 # Period of the clock: 2^30 * 3^16 minutes
 PERIOD = (1 << 30) * (3 ** 16)  # 46221064723759104
 
 # Constants for bit manipulation
 POW_2_30 = 1 << 30  # 1073741824
+
+
+def cells_to_second(visible_cells):
+    """
+    Determine clock second (0-59) from visible cell areas.
+
+    The clock is designed so that cells shown at second S always sum to S.
+    This allows instant identification of the clock second from any frame.
+    """
+    total = sum(visible_cells)
+    return total % 60  # Handle second 0 which can show sum=0 or sum=60
+
+
+def validate_observation(visible_cells):
+    """
+    Validate that observed cells form a valid combination for their implied second.
+
+    Returns (clock_second, is_valid, suggested_correction) where:
+    - clock_second: the second implied by the cell sum
+    - is_valid: True if the cells match a valid combination for that second
+    - suggested_correction: if invalid, a corrected cell set that would be valid (or None)
+    """
+    clock_second = cells_to_second(visible_cells)
+    observed_set = set(visible_cells)
+
+    # Check if observation matches any valid combination for this second
+    valid_combinations = ORDERING[clock_second]
+    for combo in valid_combinations:
+        if set(combo) == observed_set:
+            return clock_second, True, None
+
+    # Invalid - try to find a correction by flipping one cell
+    for cell in CELL_VALUES:
+        # Try adding a missing cell
+        if cell not in observed_set:
+            test_set = observed_set | {cell}
+            test_second = sum(test_set) % 60
+            for combo in ORDERING[test_second]:
+                if set(combo) == test_set:
+                    return clock_second, False, test_set
+
+        # Try removing an extra cell
+        if cell in observed_set:
+            test_set = observed_set - {cell}
+            test_second = sum(test_set) % 60
+            for combo in ORDERING[test_second]:
+                if set(combo) == test_set:
+                    return clock_second, False, test_set
+
+    return clock_second, False, None
 
 
 def int_to_base_digits(n, base, width):
@@ -273,8 +326,67 @@ def rotate_list(lst, offset):
     return lst[-offset:] + lst[:-offset] if offset else lst[:]
 
 
+def find_k_from_observations(observed_cells_list, min_match_ratio=0.9):
+    """
+    Given observed cell sets, compute the minute identifier k.
+
+    Uses sum-based second detection: cells shown at second S always sum to S.
+    This eliminates the need to try 60 rotations.
+
+    Args:
+        observed_cells_list: list of observed cell sets (one per frame/sample)
+        min_match_ratio: minimum fraction of seconds that must match (default 0.9)
+
+    Returns (start_second, k, match_count) where start_second is the clock second
+    of the first observation, or (None, None, 0) if no valid solution found.
+    """
+    min_matches = int(60 * min_match_ratio)
+
+    # Build observations indexed by clock second (using sum-based detection)
+    seconds_observed = {}  # clock_second -> observed_cells
+    start_second = None
+
+    for i, cells in enumerate(observed_cells_list):
+        clock_second = cells_to_second(cells)
+        if i == 0:
+            start_second = clock_second
+        if clock_second not in seconds_observed:
+            seconds_observed[clock_second] = cells
+
+    # Check how many of the 60 seconds we have
+    if len(seconds_observed) < min_matches:
+        return None, None, len(seconds_observed)
+
+    # Build indices array for inversion
+    indices = []
+    matches = 0
+
+    for second in range(60):
+        if second in seconds_observed:
+            cells = seconds_observed[second]
+            idx = find_combination_index(second, cells)
+            if idx >= 0:
+                matches += 1
+                indices.append(idx)
+            else:
+                indices.append(0)  # Fallback
+        else:
+            indices.append(0)  # Missing second, use default
+
+    if matches < min_matches:
+        return None, None, matches
+
+    k = inverse_perm(indices)
+    if k is not None:
+        return start_second, k, matches
+
+    return None, None, matches
+
+
 def find_rotation_and_k(observed_cells_list, min_match_ratio=0.9):
     """
+    Legacy function - redirects to sum-based detection.
+
     Given 60 observed cell sets (possibly starting at unknown second),
     find the rotation offset and minute identifier k.
 
@@ -285,39 +397,7 @@ def find_rotation_and_k(observed_cells_list, min_match_ratio=0.9):
     Returns (rotation, k, match_count) where rotation is the starting second (0-59),
     or (None, None, 0) if no valid solution found.
     """
-    min_matches = int(60 * min_match_ratio)
-    best_rotation = None
-    best_k = None
-    best_matches = 0
-
-    for rotation in range(60):
-        rotated = rotate_list(observed_cells_list, rotation)
-
-        # Count matching seconds
-        matches = 0
-        indices = []
-        for i in range(60):
-            idx = find_combination_index(i, rotated[i])
-            if idx >= 0:
-                matches += 1
-                indices.append(idx)
-            else:
-                indices.append(0)  # Default to first option
-
-        if matches > best_matches:
-            best_matches = matches
-            best_rotation = rotation
-
-            # Try to invert with the partial match
-            if matches >= min_matches:
-                k = inverse_perm(indices)
-                if k is not None:
-                    best_k = k
-
-    if best_k is not None and best_matches >= min_matches:
-        return best_rotation, best_k, best_matches
-
-    return None, None, best_matches
+    return find_k_from_observations(observed_cells_list, min_match_ratio)
 
 
 # For testing

@@ -2,12 +2,21 @@
 
 This document analyzes how to adapt the batch-based clock inversion algorithm into a real-time streaming approach suitable for an iOS app with live camera overlay.
 
+## Key Insight: Sum-Based Second Detection
+
+The clock cells have areas 1, 2, 4, 6, 12, 15, 20 (sum = 60). **Each second S displays cells that sum to exactly S.** This enables:
+
+1. **Instant second identification**: `clock_second = sum(visible_cells) % 60`
+2. **No rotation search needed**: We know which second each frame represents
+3. **Error detection**: If observed cells don't form a valid combination, detection failed
+4. **Error correction**: Try flipping one cell to find a valid match
+
 ## Current Batch Approach
 
 1. Collect all ~120 frames (60 seconds at ~2 FPS)
 2. Detect empty color via frequency clustering across ALL frames
 3. Extract cell observations for each clock second
-4. Try 60 rotations to find valid k value
+4. Use sum-based detection to identify which second each frame represents
 5. Compute clock origin from k and video timestamp
 
 ## Streaming Blockers

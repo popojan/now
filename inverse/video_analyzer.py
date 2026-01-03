@@ -425,32 +425,80 @@ def analyze_video(video_path, tolerance=80, verbose=False):
         if verbose and i < 5:
             print(f"Frame {i}: {sorted(visible)}")
 
-    # Match each frame to its clock second, then pick one frame per second
-    # This handles timing misalignment in timelapse better than grouping by time
-    from clock_inverse import find_combination_index
+    # Match each frame to its clock second using sum-based detection
+    # The sum of visible cell areas directly encodes the clock second (0-59)
+    from clock_inverse import cells_to_second, find_combination_index, validate_observation
 
-    # Find which clock second each frame matches
-    frame_to_second = []
-    for obs in frame_observations:
-        matches = [s for s in range(60) if find_combination_index(s, obs) >= 0]
-        frame_to_second.append(matches[0] if matches else -1)
-
-    # Build mapping: clock second -> first frame that matches it
+    # Build mapping: clock second -> (frame_idx, observation)
+    # Use validate_observation for error correction on invalid detections
     second_to_frame = {}
-    for frame_idx, clock_second in enumerate(frame_to_second):
-        if clock_second >= 0 and clock_second not in second_to_frame:
-            second_to_frame[clock_second] = frame_idx
+    frame_to_second = []
+    corrected_count = 0
+    second_0_frames = []  # Track frames showing second 0 for timestamp sync
 
-    # Find the starting clock second (first observation)
-    start_second = frame_to_second[0] if frame_to_second[0] >= 0 else 0
+    for frame_idx, obs in enumerate(frame_observations):
+        clock_second = cells_to_second(obs)
+        frame_to_second.append(clock_second)
+
+        # Track second 0 frames for timestamp calibration
+        if clock_second == 0:
+            second_0_frames.append(frame_idx)
+
+        if clock_second not in second_to_frame:
+            # Check if this is a valid combination
+            idx = find_combination_index(clock_second, obs)
+            if idx >= 0:
+                # Valid - use as is
+                second_to_frame[clock_second] = (frame_idx, obs)
+            else:
+                # Invalid - try error correction
+                _, is_valid, corrected = validate_observation(obs)
+                if corrected is not None:
+                    corrected_second = cells_to_second(corrected)
+                    if corrected_second not in second_to_frame:
+                        second_to_frame[corrected_second] = (frame_idx, corrected)
+                        corrected_count += 1
+                        if verbose:
+                            print(f"Frame {frame_idx}: corrected {sorted(obs)} -> {sorted(corrected)}")
+
+    if verbose and corrected_count > 0:
+        print(f"Applied {corrected_count} error corrections")
+
+    # Calculate minute boundary offset using second 0 as sync point
+    # Second 0 marks the exact minute boundary
+    # This allows precise origin calculation regardless of when recording started
+    minute_boundary_offset_ms = None
+    if second_0_frames and 0 in second_to_frame:
+        # Find first valid occurrence of second 0
+        second_0_frame = second_0_frames[0]
+        first_second = frame_to_second[0] if frame_to_second else 0
+
+        # Frame F shows second 0 at time: video_start + F * 0.5 seconds
+        # But if first_second > 0, this is second 0 of the NEXT minute (k+1)
+        # We want the start of minute k, which is 60 seconds earlier
+        offset_to_second_0 = second_0_frame * 500  # ms
+
+        if first_second > 0:
+            # Second 0 is from minute k+1, subtract 60 seconds
+            minute_boundary_offset_ms = offset_to_second_0 - 60000
+        else:
+            # First frame is second 0, so this is minute k
+            minute_boundary_offset_ms = offset_to_second_0
+
+        if verbose:
+            print(f"Second 0 at frame {second_0_frame}, "
+                  f"minute k starts at {minute_boundary_offset_ms}ms from video start")
+
+    # Find the starting clock second (first valid observation)
+    start_second = frame_to_second[0] if frame_to_second else 0
 
     # Build observation sequence starting from start_second
     all_observations = []
     for i in range(len(second_to_frame)):  # Up to number of unique seconds found
         target_second = (start_second + i) % 60
         if target_second in second_to_frame:
-            frame_idx = second_to_frame[target_second]
-            all_observations.append(frame_observations[frame_idx])
+            frame_idx, obs = second_to_frame[target_second]
+            all_observations.append(obs)
         else:
             all_observations.append(set())  # Missing second
 
@@ -465,8 +513,12 @@ def analyze_video(video_path, tolerance=80, verbose=False):
     while len(observations) < 60:
         observations.append(set())
 
-    # Store extra observations in metadata for potential verification
+    # Store extra observations and corrections in metadata
     metadata['extra_observations'] = extra_observations
+    metadata['minute_boundary_offset_ms'] = minute_boundary_offset_ms
+    metadata['corrected_frames'] = corrected_count
+    metadata['start_second'] = start_second
+
     if extra_observations and verbose:
         print(f"Video has {len(extra_observations)} extra seconds for verification")
 
