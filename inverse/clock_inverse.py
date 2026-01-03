@@ -203,13 +203,6 @@ def perm(k):
     return result
 
 
-def get_cells_for_second(k, second):
-    """Get the set of visible cells for a given second and minute identifier k."""
-    indices = perm(k)
-    idx = indices[second]
-    return set(ORDERING[second][idx])
-
-
 def get_all_cells_for_minute(k):
     """Get list of 60 cell-sets, one for each second of the minute."""
     indices = perm(k)
@@ -304,28 +297,6 @@ def inverse_from_observations(observed_cells_list):
     return k, indices
 
 
-def verify_inversion(k, observed_cells_list):
-    """
-    Verify that perm(k) produces the observed cell combinations.
-    Returns True if valid, False otherwise.
-    """
-    if k is None:
-        return False
-
-    expected = get_all_cells_for_minute(k)
-    for second in range(60):
-        if expected[second] != set(observed_cells_list[second]):
-            return False
-    return True
-
-
-def rotate_list(lst, offset):
-    """Rotate list by offset positions (positive = shift right)."""
-    n = len(lst)
-    offset = offset % n
-    return lst[-offset:] + lst[:-offset] if offset else lst[:]
-
-
 def find_k_from_observations(observed_cells_list, min_match_ratio=0.9):
     """
     Given observed cell sets, compute the minute identifier k.
@@ -383,26 +354,8 @@ def find_k_from_observations(observed_cells_list, min_match_ratio=0.9):
     return None, None, matches
 
 
-def find_rotation_and_k(observed_cells_list, min_match_ratio=0.9):
-    """
-    Legacy function - redirects to sum-based detection.
-
-    Given 60 observed cell sets (possibly starting at unknown second),
-    find the rotation offset and minute identifier k.
-
-    Args:
-        observed_cells_list: list of 60 sets of visible cell IDs
-        min_match_ratio: minimum fraction of seconds that must match (default 0.9)
-
-    Returns (rotation, k, match_count) where rotation is the starting second (0-59),
-    or (None, None, 0) if no valid solution found.
-    """
-    return find_k_from_observations(observed_cells_list, min_match_ratio)
-
-
 # For testing
 if __name__ == "__main__":
-    # Test round-trip: perm then inverse
     import random
 
     print("Testing perm/inverse round-trip...")
@@ -419,21 +372,27 @@ if __name__ == "__main__":
 
     print("Round-trip test complete.")
 
-    # Test rotation finding
-    print("\nTesting rotation finding...")
+    print("\nTesting sum-based second detection...")
 
     test_k = random.randint(0, PERIOD - 1)
     cells = get_all_cells_for_minute(test_k)
 
-    for test_rotation in [0, 15, 30, 45, 59]:
-        # Simulate video starting at second test_rotation
-        rotated_cells = rotate_list(cells, -test_rotation)
-        found_rotation, found_k = find_rotation_and_k(rotated_cells)
+    # Test that cells_to_second works for all 60 seconds
+    for second in range(60):
+        detected = cells_to_second(cells[second])
+        if detected != second:
+            print(f"FAIL: second {second}, detected {detected}")
+        elif second < 5:
+            print(f"OK: second {second} -> sum {sum(cells[second])}")
 
-        if found_rotation == test_rotation and found_k == test_k:
-            print(f"OK: rotation={test_rotation}")
-        else:
-            print(f"FAIL: expected rotation={test_rotation}, k={test_k}")
-            print(f"      got rotation={found_rotation}, k={found_k}")
+    print("Sum-based detection test complete.")
 
-    print("Rotation test complete.")
+    print("\nTesting find_k_from_observations...")
+
+    start_second, found_k, matches = find_k_from_observations(cells)
+    if found_k == test_k:
+        print(f"OK: k={test_k}, matches={matches}/60")
+    else:
+        print(f"FAIL: expected k={test_k}, got k={found_k}")
+
+    print("All tests complete.")

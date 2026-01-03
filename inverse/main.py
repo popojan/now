@@ -14,10 +14,8 @@ import sys
 from datetime import datetime, timedelta
 
 from clock_inverse import (
-    find_rotation_and_k,
-    verify_inversion,
+    find_k_from_observations,
     get_all_cells_for_minute,
-    rotate_list,
     PERIOD,
 )
 from video_analyzer import analyze_video, VideoTooShortError
@@ -162,19 +160,19 @@ def main():
         for i, obs in enumerate(observations[:5]):
             print(f"  Second {i}: {sorted(obs)}")
 
-    # Find rotation and k - try progressively lower thresholds if needed
+    # Find k using sum-based detection - try progressively lower thresholds if needed
     print("\nSearching for valid clock state...")
-    rotation, k, match_count = find_rotation_and_k(observations)
+    start_second, k, match_count = find_k_from_observations(observations)
 
     # If 90% threshold fails, try lower thresholds
-    if rotation is None:
+    if k is None:
         for threshold in [0.85, 0.80, 0.75]:
-            rotation, k, match_count = find_rotation_and_k(observations, min_match_ratio=threshold)
-            if rotation is not None:
+            start_second, k, match_count = find_k_from_observations(observations, min_match_ratio=threshold)
+            if k is not None:
                 print(f"  (Used {int(threshold*100)}% match threshold)")
                 break
 
-    if rotation is None:
+    if k is None:
         print(f"\nError: Could not find valid clock state ({match_count}/60 matches).", file=sys.stderr)
         print("Possible causes:", file=sys.stderr)
         print("  - Video does not show the Mondrian clock", file=sys.stderr)
@@ -183,50 +181,24 @@ def main():
         sys.exit(1)
 
     print(f"Found valid state! ({match_count}/60 seconds matched)")
-    print(f"  Video started at second: {rotation}")
+    print(f"  Video started at second: {start_second}")
     print(f"  Minute identifier (k): {k}")
 
     # Verify with main observations
     if args.verbose:
         expected = get_all_cells_for_minute(k)
-        rotated_obs = rotate_list(observations, rotation)
         print("\nVerification (first 10 seconds):")
-        for i in range(10):
+        for i in range(min(10, len(observations))):
             expected_cells = sorted(expected[i])
-            observed_cells = sorted(rotated_obs[i])
+            observed_cells = sorted(observations[i])
             match = "OK" if set(expected_cells) == set(observed_cells) else "MISMATCH"
             print(f"  Second {i}: expected {expected_cells}, observed {observed_cells} [{match}]")
 
-    # Cross-validate with extra observations (for videos > 60 seconds)
-    extra_obs = metadata.get('extra_observations', [])
-    if extra_obs:
-        # Extra observations start where the main ones ended
-        # After 60 seconds, we're in minute k+1, k+2, etc.
-        # The starting second in the new minute depends on rotation
-        extra_verified = 0
-        extra_total = len(extra_obs)
-
-        for i, obs in enumerate(extra_obs):
-            # Calculate which minute and second this observation represents
-            total_second = 60 + i  # seconds since video start
-            # After rotation alignment: which absolute second is this?
-            abs_second = (rotation + total_second) % 60
-            minute_offset = (rotation + total_second) // 60
-            expected_k = k + minute_offset
-
-            expected_cells = get_all_cells_for_minute(expected_k)
-            if set(expected_cells[abs_second]) == set(obs):
-                extra_verified += 1
-
-        print(f"\nCross-validation with extra {extra_total} seconds: {extra_verified}/{extra_total} matched")
-        if extra_verified < extra_total * 0.9:
-            print("  Warning: Low cross-validation match rate", file=sys.stderr)
-
     # Compute origin
-    clock_origin, sub_second_ms = compute_clock_origin(video_timestamp, rotation, k, minute_boundary_offset_ms)
+    clock_origin, sub_second_ms = compute_clock_origin(video_timestamp, start_second, k, minute_boundary_offset_ms)
 
     # Compute elapsed time
-    seconds_elapsed = k * 60 + rotation
+    seconds_elapsed = k * 60 + start_second
     minutes_elapsed = k
     days_elapsed = minutes_elapsed / (60 * 24)
     years_elapsed = days_elapsed / 365.25
