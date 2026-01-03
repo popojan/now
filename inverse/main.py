@@ -213,8 +213,14 @@ def main():
     if years_elapsed >= 1:
         print(f", {years_elapsed:,.1f} years", end="")
     print(")")
-    print(f"\nClock origin (datetime):")
-    print(f"  {format_timestamp(clock_origin)}")
+    # Convert to UTC for display (clock now uses UTC origin)
+    if hasattr(clock_origin, 'tzinfo') and clock_origin.tzinfo is not None:
+        from datetime import timezone
+        clock_origin_utc = clock_origin.astimezone(timezone.utc)
+    else:
+        clock_origin_utc = clock_origin
+    print(f"\nClock origin (UTC):")
+    print(f"  {format_timestamp(clock_origin_utc)}")
 
     print(f"\nNote: The clock period is {PERIOD:,} minutes")
     print(f"      (>{PERIOD / (60 * 24 * 365.25) / 1e9:.0f} billion years)")
