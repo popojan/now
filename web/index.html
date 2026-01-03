@@ -144,36 +144,16 @@
         }
     }
 
-    Date.prototype.stdTimezoneOffset = function () {
-        let jan = new Date(this.getFullYear(), 0, 1);
-        let jul = new Date(this.getFullYear(), 6, 1);
-        return Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
-    }
-
-    Date.prototype.isDstObserved = function () {
-        return this.getTimezoneOffset() < this.stdTimezoneOffset();
-    }
-    let tz = BigInt(new Date().getTimezoneOffset());
-
-    let today = new Date();
-    if (today.isDstObserved()) {
-        tz -= 60n;
-    }
-
-    function parseISOLocal(s) {
-        let b = s.split(/\D/);
-        return new Date(b[0], b[1]-1, b[2], b[3], b[4], b[5]);
-    }
-
     const param = new URLSearchParams(window.location.search);
     try {
-        origin = parseISOLocal(param.get('origin')  || origin0);
+        // Use new Date() to properly handle ISO 8601 format including Z suffix for UTC
+        origin = new Date(param.get('origin') || origin0);
         offset = BigInt(param.get('offset')||"0");
         tick = BigInt(param.get('period')||"1");
         period = BigInt(param.get('mod')||"60");
     } catch (error) {
         console.log(error);
-        origin = parseISOLocal(origin0);
+        origin = new Date(origin0);
         offset = 0n;
         tick = 1n;
         period = 60n;
