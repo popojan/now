@@ -151,12 +151,19 @@
         offset = BigInt(param.get('offset')||"0");
         tick = BigInt(param.get('period')||"1");
         period = BigInt(param.get('mod')||"60");
+        monochrome = parseInt(param.get('mono')||"0")>0;
     } catch (error) {
         console.log(error);
         origin = new Date(origin0);
         offset = 0n;
         tick = 1n;
         period = 60n;
+        monochrome = false;
+    }
+    if(monochrome) {
+        for(const el of document.getElementsByTagName("td")){
+            el.style.backgroundColor = "#eb0000";
+        }
     }
     function integerDigitsBasePad(n, base, width) {
         return n.toString(base).padStart(width, "0").split("").map(

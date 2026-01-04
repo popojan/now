@@ -17,11 +17,51 @@ Also released on Wallpaper Engine with adjustable colors.
 - **Time representation**: Uses a permutation-based system to map time values to combinations of visible cells
 - **URL parameters**: Supports `origin`, `offset`, `period`, and `mod` query parameters to customize the time display
 
+## Inverse Video Analyzer (`inverse/`)
+
+The `inverse/` directory contains a video analyzer that determines when the clock was originally started by analyzing a video recording of the clock.
+
+### Key Files
+
+- **clock_inverse.py**: Core algorithm with `perm()` (forward) and `inverse_perm()` (reverse) functions
+- **video_analyzer.py**: Video processing with OpenCV - cell detection, perspective correction, corner tracking
+- **main.py**: CLI entry point
+- **metadata.py**: Video timestamp extraction
+
+### Key Concepts
+
+- **Sum-based second detection**: Cells shown at second S always sum to S (`cells_to_second(cells) = sum(cells) % 60`)
+- **Cell areas**: 1, 2, 4, 6, 12, 15, 20 (sum = 60)
+- **Grid structure**: 6 columns × 10 rows with black grid lines
+- **Perspective correction**: Warp detected quadrilateral to standard rectangle
+- **Per-frame corner tracking**: For videos with camera motion
+
+### Running the Video Analyzer
+
+**IMPORTANT: Always activate the venv first!**
+
+```bash
+cd inverse
+source venv/bin/activate
+python main.py /path/to/video.MOV -v
+```
+
 ## Development
 
-To run locally, serve the `web/` directory with any static file server:
+### Web Clock
+
+Serve the `web/` directory with any static file server:
 ```bash
 python3 -m http.server 8000 --directory web
+```
+
+### Video Analyzer
+
+```bash
+cd inverse
+source venv/bin/activate
+pip install -r requirements.txt  # if needed
+python main.py <video_path> [--verbose] [--tolerance N]
 ```
 
 ## Key Implementation Details
@@ -30,3 +70,4 @@ python3 -m http.server 8000 --directory web
 - `perm()` function generates pseudo-random permutations based on time
 - Click anywhere to cycle through display modes (minutes → hours → minutes)
 - DST handling is built into the timezone offset calculation
+- Clock origin is stored in UTC to be timezone-independent
