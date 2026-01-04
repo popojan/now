@@ -109,10 +109,10 @@ static int cell_idx(int cell) {
 
 /*
  * Graph coloring: no two edge-adjacent cells share the same fill.
- * (Corner touching is OK - like Mondrian)
- * Edge adjacencies: 20-{12,15}, 12-{1,4}, 15-{1,2,6}, 1-{2}, 2-{4,6}, 4-{6}
- * 3-coloring solution:
- *   A: 2, 12    B: 4, 15    C: 1, 6, 20
+ * Edge adjacencies: 20-{12,15,1}, 12-{20,1,4}, 15-{20,1,2,6}, 1-{20,12,15,2},
+ *                   2-{15,1,4,6}, 4-{12,2,6}, 6-{15,2,4}
+ * 4-coloring required (3 is insufficient):
+ *   A: 4, 15    B: 2, 20    C: 1    D: 6, 12
  */
 static char custom_fill[8][3];  /* For -f option */
 
@@ -134,14 +134,14 @@ static void set_ascii(int distinct, const char *fill_chars) {
             fprintf(stderr, "Warning: -f contains space - inverse mode won't work\n");
         }
     } else if (distinct) {
-        /* 3-color graph coloring: A=##, B=@@, C=%% */
-        FILL[1] = "%%"; /* 1 -> C */
-        FILL[2] = "##"; /* 2 -> A */
-        FILL[3] = "@@"; /* 4 -> B */
-        FILL[4] = "%%"; /* 6 -> C */
-        FILL[5] = "##"; /* 12 -> A */
-        FILL[6] = "@@"; /* 15 -> B */
-        FILL[7] = "%%"; /* 20 -> C */
+        /* 4-color graph coloring: A=##, B=@@, C=$$, D=%% */
+        FILL[1] = "$$"; /* 1 -> C */
+        FILL[2] = "@@"; /* 2 -> B */
+        FILL[3] = "##"; /* 4 -> A */
+        FILL[4] = "%%"; /* 6 -> D */
+        FILL[5] = "%%"; /* 12 -> D */
+        FILL[6] = "##"; /* 15 -> A */
+        FILL[7] = "@@"; /* 20 -> B */
     } else {
         for (int i = 1; i < 8; i++) FILL[i] = "##";
     }
@@ -153,14 +153,14 @@ static void set_unicode(int distinct) {
     B_HORIZ = "\xe2\x94\x80"; B_VERT = "\xe2\x94\x82";
     FILL[0] = "  ";
     if (distinct) {
-        /* 3-color: A=██, B=▓▓, C=▒▒ */
+        /* 4-color: A=██, B=▓▓, C=▒▒, D=░░ */
         FILL[1] = "\xe2\x96\x92\xe2\x96\x92"; /* 1 -> C ▒▒ */
-        FILL[2] = "\xe2\x96\x88\xe2\x96\x88"; /* 2 -> A ██ */
-        FILL[3] = "\xe2\x96\x93\xe2\x96\x93"; /* 4 -> B ▓▓ */
-        FILL[4] = "\xe2\x96\x92\xe2\x96\x92"; /* 6 -> C ▒▒ */
-        FILL[5] = "\xe2\x96\x88\xe2\x96\x88"; /* 12 -> A ██ */
-        FILL[6] = "\xe2\x96\x93\xe2\x96\x93"; /* 15 -> B ▓▓ */
-        FILL[7] = "\xe2\x96\x92\xe2\x96\x92"; /* 20 -> C ▒▒ */
+        FILL[2] = "\xe2\x96\x93\xe2\x96\x93"; /* 2 -> B ▓▓ */
+        FILL[3] = "\xe2\x96\x88\xe2\x96\x88"; /* 4 -> A ██ */
+        FILL[4] = "\xe2\x96\x91\xe2\x96\x91"; /* 6 -> D ░░ */
+        FILL[5] = "\xe2\x96\x91\xe2\x96\x91"; /* 12 -> D ░░ */
+        FILL[6] = "\xe2\x96\x88\xe2\x96\x88"; /* 15 -> A ██ */
+        FILL[7] = "\xe2\x96\x93\xe2\x96\x93"; /* 20 -> B ▓▓ */
     } else {
         for (int i = 1; i < 8; i++) FILL[i] = "\xe2\x96\x88\xe2\x96\x88";
     }
@@ -424,17 +424,28 @@ static int run_inverse(void) {
 
     /* Compute and display origin timestamp */
     time_t now = time(NULL);
-    time_t origin = now - (time_t)(k * 60 + rot);
+    time_t origin_time = now - (time_t)(k * 60 + rot);
     struct tm local_tm = {0}, utc_tm = {0};
-    struct tm *tmp = localtime(&origin);
+    struct tm *tmp = localtime(&origin_time);
     if (tmp) local_tm = *tmp;
-    tmp = gmtime(&origin);
+    tmp = gmtime(&origin_time);
     if (tmp) utc_tm = *tmp;
-    printf("Origin: %04d-%02d-%02d %02d:%02d:%02d (local) = %04d-%02d-%02dT%02d:%02d:%02dZ\n",
+
+    /* Compute timezone offset */
+    int off_min = (local_tm.tm_hour - utc_tm.tm_hour) * 60 +
+                  (local_tm.tm_min - utc_tm.tm_min);
+    if (local_tm.tm_mday != utc_tm.tm_mday) {
+        off_min += (local_tm.tm_mday > utc_tm.tm_mday ||
+                   (local_tm.tm_mon > utc_tm.tm_mon) ||
+                   (local_tm.tm_year > utc_tm.tm_year)) ? 1440 : -1440;
+    }
+    int off_h = off_min / 60;
+    int off_m = (off_min < 0 ? -off_min : off_min) % 60;
+
+    printf("Origin: %04d-%02d-%02dT%02d:%02d:%02d%+03d:%02d\n",
            local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday,
            local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec,
-           utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
-           utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
+           off_h, off_m);
     return 0;
 }
 
@@ -449,7 +460,7 @@ static void usage(const char *prog) {
     printf("Display:\n");
     printf("  -a          ASCII mode (.|'#)\n");
     printf("  -u          Unicode mode (box drawing + blocks) [default]\n");
-    printf("  -d          Distinct fills (3-color graph coloring)\n");
+    printf("  -d          Distinct fills (4-color graph coloring)\n");
     printf("  -f CHARS    Custom fill chars for cells 1,2,4,6,12,15,20 (7 chars)\n\n");
     printf("Time:\n");
     printf("  -o ORIGIN   Custom origin (ISO 8601, e.g. 2000-01-01T00:00:00Z)\n");
@@ -517,8 +528,8 @@ int main(int argc, char **argv) {
         int idx = perm_index(k, sec);
         uint8_t mask = COMBOS[sec][idx];
 
-        /* In-place mode: move cursor up to overwrite previous frame */
-        if (live_inplace && frame > 0) printf("\033[13A");
+        /* In-place mode: move cursor up to overwrite previous frame (TTY only) */
+        if (live_inplace && frame > 0 && IS_TTY()) printf("\033[13A");
 
         render(mask);
 
@@ -526,18 +537,30 @@ int main(int argc, char **argv) {
         if (num_frames < 0) SLEEP_MS(1000);  /* Only sleep in live mode */
     }
 
-    /* On exit, print local system time (for computing clock start from decoded k) */
+    /* On exit, print timestamps in ISO 8601 format */
     time_t end_time = time(NULL);
     struct tm local_tm = {0}, utc_tm = {0};
     struct tm *tmp = localtime(&end_time);
     if (tmp) local_tm = *tmp;
     tmp = gmtime(&end_time);
     if (tmp) utc_tm = *tmp;
-    fprintf(stderr, "\n--- %04d-%02d-%02d %02d:%02d:%02d (local) = %04d-%02d-%02dT%02d:%02d:%02dZ ---\n",
+
+    /* Compute timezone offset */
+    int off_min = (local_tm.tm_hour - utc_tm.tm_hour) * 60 +
+                  (local_tm.tm_min - utc_tm.tm_min);
+    /* Handle day boundary */
+    if (local_tm.tm_mday != utc_tm.tm_mday) {
+        off_min += (local_tm.tm_mday > utc_tm.tm_mday ||
+                   (local_tm.tm_mon > utc_tm.tm_mon) ||
+                   (local_tm.tm_year > utc_tm.tm_year)) ? 1440 : -1440;
+    }
+    int off_h = off_min / 60;
+    int off_m = (off_min < 0 ? -off_min : off_min) % 60;
+
+    fprintf(stderr, "\n%04d-%02d-%02dT%02d:%02d:%02d%+03d:%02d\n",
            local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday,
            local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec,
-           utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
-           utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
+           off_h, off_m);
 
     return 0;
 }
