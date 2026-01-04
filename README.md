@@ -29,7 +29,20 @@ The clock's period is **(2^30) × (3^16) = 46,221,064,723,759,104 minutes**, whi
 |      |  10   |
 |______|_______|
 ```
-(6×10 grid, each cell area = its number)
+
+```
+    0  1  2  3  4  5
+0: 20 20 20 20 12 12
+1: 20 20 20 20 12 12
+2: 20 20 20 20 12 12
+3: 20 20 20 20 12 12
+4: 20 20 20 20 12 12
+5: 15 15 15  1 12 12
+6: 15 15 15  2  4  4
+7: 15 15 15  2  4  4
+8: 15 15 15  6  6  6
+9: 15 15 15  6  6  6
+```
 
 ## Project Structure
 
@@ -37,6 +50,10 @@ The clock's period is **(2^30) × (3^16) = 46,221,064,723,759,104 minutes**, whi
 now/
 ├── web/
 │   └── index.html      # The clock webpage
+├── terminal/
+│   ├── clock.c         # Terminal clock (C, cross-platform)
+│   ├── Makefile
+│   └── README.md       # Terminal clock documentation
 ├── inverse/
 │   ├── main.py         # CLI tool to decode clock videos
 │   ├── clock_inverse.py    # Core inversion algorithm
@@ -51,7 +68,29 @@ now/
 
 **Note**: Test videos are stored with Git LFS. Run `git lfs pull` after cloning.
 
-## Inverse Tool
+## Terminal Clock
+
+The `terminal/` directory contains a lightweight C implementation of the clock for terminal display. It supports both ASCII and Unicode modes, and includes inverse mode to decode frames.
+
+See [terminal/README.md](terminal/README.md) for full documentation.
+
+### Quick Start
+
+```bash
+cd terminal
+make
+./clock              # Live clock
+./clock -a -d        # ASCII with 3-color distinction
+```
+
+### Round-trip Test
+
+```bash
+./clock -a -k 12345 -n 60 | ./clock -i
+# Output: Minute (k): 12345
+```
+
+## Inverse Tool (Video)
 
 The `inverse/` directory contains a Python tool that analyzes a 60-second video recording of the clock and determines when the clock was originally started.
 
