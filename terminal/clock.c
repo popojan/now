@@ -8,11 +8,14 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <io.h>
 #define SLEEP_MS(ms) Sleep(ms)
+#define IS_TTY() _isatty(_fileno(stdout))
 static void enable_utf8(void) { SetConsoleOutputCP(65001); }
 #else
 #include <unistd.h>
 #define SLEEP_MS(ms) usleep((ms)*1000)
+#define IS_TTY() isatty(STDOUT_FILENO)
 static void enable_utf8(void) { /* UTF-8 default on Unix */ }
 #endif
 
@@ -440,6 +443,7 @@ static void usage(const char *prog) {
     printf("Usage: %s [options]\n\n", prog);
     printf("Modes:\n");
     printf("  (default)   Run clock, display frames (1/sec)\n");
+    printf("  -l          Live: in-place update (no scroll, requires TTY)\n");
     printf("  -i          Inverse: read 60 frames from stdin, output k\n");
     printf("  -n N        Output N frames fast (no delay), then exit\n\n");
     printf("Display:\n");
@@ -458,7 +462,7 @@ static void usage(const char *prog) {
 }
 
 int main(int argc, char **argv) {
-    int unicode = 1, distinct = 0, inverse = 0;
+    int unicode = 1, distinct = 0, inverse = 0, live_inplace = 0;
     time_t origin = 0;  /* Unix epoch default, same as webpage */
     int64_t fixed_k = -1;  /* -1 means use system time */
     int64_t num_frames = -1;  /* -1 means infinite (live mode) */
@@ -468,6 +472,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "-a") == 0) unicode = 0;
         else if (strcmp(argv[i], "-u") == 0) unicode = 1;
         else if (strcmp(argv[i], "-d") == 0) distinct = 1;
+        else if (strcmp(argv[i], "-l") == 0) live_inplace = 1;
         else if (strcmp(argv[i], "-i") == 0) inverse = 1;
         else if (strcmp(argv[i], "-f") == 0 && i+1 < argc)
             fill_chars = argv[++i];
@@ -511,6 +516,10 @@ int main(int argc, char **argv) {
 
         int idx = perm_index(k, sec);
         uint8_t mask = COMBOS[sec][idx];
+
+        /* In-place mode: move cursor up to overwrite previous frame */
+        if (live_inplace && frame > 0) printf("\033[13A");
+
         render(mask);
 
         frame++;

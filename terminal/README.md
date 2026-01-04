@@ -27,7 +27,8 @@ gcc -Os -Wall -s -o clock clock.c
 ./clock [options]
 
 Modes:
-  (default)   Run clock, display frames (1/sec)
+  (default)   Run clock, display frames (1/sec), scrolling output
+  -l          Live: in-place update (no scroll, uses ANSI escape codes)
   -i          Inverse: read 60 frames from stdin, output k
   -n N        Output N frames fast (no delay), then exit
 
@@ -44,9 +45,14 @@ Time:
 
 ## Examples
 
-Live clock with Unicode:
+Live clock with Unicode (scrolling):
 ```bash
 ./clock
+```
+
+Live clock with in-place updates:
+```bash
+./clock -l
 ```
 
 Generate 60 frames for minute 12345 in ASCII:
