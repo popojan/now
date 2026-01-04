@@ -872,13 +872,8 @@ def analyze_video(video_path, tolerance=80, verbose=False):
         print(f"Loaded {len(frames)} frames, {metadata['fps']:.2f} FPS, "
               f"{metadata['duration']:.1f}s video, ~{metadata['real_duration']:.1f}s real")
 
-    # Check video duration
-    real_duration = metadata['real_duration']
-    if real_duration < 59.5:  # Allow small tolerance for 60s videos
-        raise VideoTooShortError(
-            f"Video is too short ({real_duration:.1f}s). "
-            f"Need at least 60 seconds for unique clock identification."
-        )
+    # Note: We don't check duration here - sum-based detection is FPS-independent.
+    # The actual check happens after detection: do we have observations for all 60 seconds?
 
     if len(frames) == 0:
         raise ValueError("No frames extracted from video")
@@ -1053,6 +1048,15 @@ def analyze_video(video_path, tolerance=80, verbose=False):
             if verbose:
                 print("Using simple approach (Hough not better)")
 
+    # Check if we have enough unique seconds (need ~40 info-carrying seconds)
+    unique_seconds = len(second_to_frame)
+    if unique_seconds < 40:
+        raise VideoTooShortError(
+            f"Only detected {unique_seconds}/60 unique seconds. "
+            f"Need at least 40 for clock identification. "
+            f"Video may be too short or detection failed."
+        )
+
     # Warp frames for verbose output and timestamp sync
     warped_frames = []
     for i, frame in enumerate(frames):
@@ -1122,6 +1126,9 @@ def analyze_video(video_path, tolerance=80, verbose=False):
     observations = all_observations[:60]
     extra_observations = all_observations[60:] if len(all_observations) > 60 else []
 
+    # Count real (non-empty) observations before padding
+    real_observations = sum(1 for obs in observations if obs)
+
     # Pad to 60 if needed (shouldn't happen with duration check, but safety)
     while len(observations) < 60:
         observations.append(set())
@@ -1131,6 +1138,7 @@ def analyze_video(video_path, tolerance=80, verbose=False):
     metadata['minute_boundary_offset_ms'] = minute_boundary_offset_ms
     metadata['corrected_frames'] = corrected_count
     metadata['start_second'] = start_second
+    metadata['real_observations'] = real_observations  # Non-empty observation count
 
     if extra_observations and verbose:
         print(f"Video has {len(extra_observations)} extra seconds for verification")

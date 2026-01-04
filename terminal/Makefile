@@ -11,4 +11,7 @@ now: now.c
 clean:
 	rm -f now now.exe
 
-.PHONY: clean
+test: now
+	./test_inverse.sh
+
+.PHONY: clean test

@@ -12,11 +12,22 @@
 #define SLEEP_MS(ms) Sleep(ms)
 #define IS_TTY() _isatty(_fileno(stdout))
 static void enable_utf8(void) { SetConsoleOutputCP(65001); }
+static int get_milliseconds(void) {
+    SYSTEMTIME st;
+    GetSystemTime(&st);
+    return st.wMilliseconds;
+}
 #else
 #include <unistd.h>
+#include <sys/time.h>
 #define SLEEP_MS(ms) usleep((ms)*1000)
 #define IS_TTY() isatty(STDOUT_FILENO)
 static void enable_utf8(void) { /* UTF-8 default on Unix */ }
+static int get_milliseconds(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (int)(tv.tv_usec / 1000);
+}
 #endif
 
 static volatile int running = 1;
@@ -328,6 +339,33 @@ static int find_combo_idx(int s, uint8_t mask) {
     return -1;
 }
 
+static const uint64_t PERIOD = 46221064723759104ULL;
+
+/* Verify k against observations spanning two minutes.
+ * When first_sec > 0: seconds 0..first_sec-1 from minute k,
+ *                     seconds first_sec..59 from minute k-1.
+ * Returns match count (0-60). */
+static int verify_k_spanning(uint64_t k, uint8_t masks[60], int rot, int first_sec) {
+    uint64_t k_minus_1 = (k > 0) ? k - 1 : PERIOD - 1;
+    int matches = 0;
+
+    for (int s = 0; s < 60; s++) {
+        int frame_idx = (s + rot) % 60;
+        uint64_t minute;
+        if (first_sec == 0) {
+            minute = k;
+        } else if (s < first_sec) {
+            minute = k;         /* Seconds 0..first_sec-1 from minute k */
+        } else {
+            minute = k_minus_1; /* Seconds first_sec..59 from minute k-1 */
+        }
+        int expected_idx = perm_index(minute, s);
+        uint8_t expected_mask = COMBOS[s][expected_idx];
+        if (expected_mask == masks[frame_idx]) matches++;
+    }
+    return matches;
+}
+
 /* Reconstruct k from 60 observed masks */
 static int reconstruct_k(uint8_t masks[60], uint64_t *out_k) {
     /* Try all 60 rotations to find the starting second */
@@ -364,27 +402,50 @@ static int reconstruct_k(uint8_t masks[60], uint64_t *out_k) {
             }
         }
 
-        if (valid) {
-            /* Reconstruct k from extracted bits */
-            uint64_t k3_val = 0;
-            for (int i = 0; i < n3; i++) {
-                k3_val = k3_val * 3 + k3_digits[i];
-            }
-            uint64_t k_candidate = k3_val * 1073741824ULL + (k2_bits | k4_bits);
+        if (!valid) continue;
 
-            /* Verify: check that k_candidate reproduces all observed masks */
-            int verified = 1;
-            for (int s = 0; s < 60 && verified; s++) {
-                int frame_idx = (s + rot) % 60;
-                int expected_idx = perm_index(k_candidate, s);
-                uint8_t expected_mask = COMBOS[s][expected_idx];
-                if (expected_mask != masks[frame_idx]) verified = 0;
-            }
+        /* Reconstruct k from extracted bits */
+        uint64_t k3_val = 0;
+        for (int i = 0; i < n3; i++) {
+            k3_val = k3_val * 3 + k3_digits[i];
+        }
+        uint64_t k_candidate = k3_val * 1073741824ULL + (k2_bits | k4_bits);
+        int first_sec = (rot == 0) ? 0 : (60 - rot);
 
-            if (verified) {
-                *out_k = k_candidate;
-                return rot;
+        /* When first_sec > 0, observations span two minutes.
+         * Search around k_candidate and also around 0 (for wrap-around). */
+        uint64_t best_k = 0;
+        int best_matches = 0;
+
+        uint64_t search_centers[2] = {k_candidate, 0};
+        for (int c = 0; c < 2; c++) {
+            uint64_t center = search_centers[c];
+            for (int delta = 0; delta < 100; delta++) {
+                for (int sign = 0; sign <= 1; sign++) {
+                    uint64_t candidate;
+                    if (sign == 0) {
+                        candidate = (center + delta) % PERIOD;
+                    } else {
+                        candidate = (center >= (uint64_t)delta) ? center - delta : PERIOD - delta + center;
+                    }
+                    int matches = verify_k_spanning(candidate, masks, rot, first_sec);
+                    if (matches > best_matches) {
+                        best_matches = matches;
+                        best_k = candidate;
+                    }
+                    /* Perfect match - return immediately */
+                    if (matches == 60) {
+                        *out_k = candidate;
+                        return rot;
+                    }
+                }
             }
+        }
+
+        /* Return best match if good enough (90% = 54/60) */
+        if (best_matches >= 54) {
+            *out_k = best_k;
+            return rot;
         }
     }
     return -1; /* Failed */
@@ -411,6 +472,21 @@ static int run_inverse(void) {
         return 1;
     }
 
+    /* Try to read timestamp line: ISO8601 format */
+    char line[256];
+    time_t start_time = 0;
+    while (fgets(line, sizeof(line), stdin)) {
+        /* Look for ISO 8601 timestamp: YYYY-MM-DDTHH:MM:SSZ */
+        if (line[0] >= '0' && line[0] <= '9' && strlen(line) >= 20) {
+            start_time = parse_origin(line);
+            if (start_time > 0) break;
+        }
+    }
+    if (start_time == 0) {
+        /* No timestamp found, use current time (legacy behavior) */
+        start_time = time(NULL);
+    }
+
     fprintf(stderr, "Reconstructing minute number...\n");
     uint64_t k;
     int rot = reconstruct_k(masks, &k);
@@ -419,33 +495,20 @@ static int run_inverse(void) {
         return 1;
     }
 
-    printf("Minute (k): %llu\n", (unsigned long long)k);
-    printf("Rotation: %d (first frame was second %d)\n", rot, rot);
+    /* First frame's second = (60 - rot) % 60 */
+    int first_sec = (rot == 0) ? 0 : (60 - rot);
 
-    /* Compute and display origin timestamp */
-    time_t now = time(NULL);
-    time_t origin_time = now - (time_t)(k * 60 + rot);
-    struct tm local_tm = {0}, utc_tm = {0};
-    struct tm *tmp = localtime(&origin_time);
-    if (tmp) local_tm = *tmp;
-    tmp = gmtime(&origin_time);
-    if (tmp) utc_tm = *tmp;
+    /* Compute origin: find when second 0 occurred, then subtract k minutes.
+     * If first_sec > 0, second 0 occurs (60-first_sec) seconds after start. */
+    int seconds_to_second_0 = (60 - first_sec) % 60;
+    time_t second_0_time = start_time + seconds_to_second_0;
+    time_t origin_time = second_0_time - (time_t)(k * 60);
+    struct tm *utc = gmtime(&origin_time);
 
-    /* Compute timezone offset */
-    int off_min = (local_tm.tm_hour - utc_tm.tm_hour) * 60 +
-                  (local_tm.tm_min - utc_tm.tm_min);
-    if (local_tm.tm_mday != utc_tm.tm_mday) {
-        off_min += (local_tm.tm_mday > utc_tm.tm_mday ||
-                   (local_tm.tm_mon > utc_tm.tm_mon) ||
-                   (local_tm.tm_year > utc_tm.tm_year)) ? 1440 : -1440;
-    }
-    int off_h = off_min / 60;
-    int off_m = (off_min < 0 ? -off_min : off_min) % 60;
-
-    printf("Origin: %04d-%02d-%02dT%02d:%02d:%02d%+03d:%02d\n",
-           local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday,
-           local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec,
-           off_h, off_m);
+    /* Output origin as ISO 8601 UTC */
+    printf("%04d-%02d-%02dT%02d:%02d:%02dZ\n",
+           utc->tm_year + 1900, utc->tm_mon + 1, utc->tm_mday,
+           utc->tm_hour, utc->tm_min, utc->tm_sec);
     return 0;
 }
 
@@ -453,10 +516,11 @@ static void usage(const char *prog) {
     printf("Mondrian Terminal Clock\n\n");
     printf("Usage: %s [options]\n\n", prog);
     printf("Modes:\n");
-    printf("  (default)   Run clock, display frames (1/sec)\n");
-    printf("  -l          Live: in-place update (no scroll, requires TTY)\n");
-    printf("  -i          Inverse: read 60 frames from stdin, output k\n");
-    printf("  -n N        Output N frames fast (no delay), then exit\n\n");
+    printf("  (default)   Live clock, display frames (1/sec)\n");
+    printf("  -s          Simulate: fast output (no delay), timestamp as-if-live\n");
+    printf("  -l          In-place update (no scroll, requires TTY)\n");
+    printf("  -i          Inverse: read frames from stdin, output k and origin\n");
+    printf("  -n N        Output N frames then exit\n\n");
     printf("Display:\n");
     printf("  -a          ASCII mode (.|'#)\n");
     printf("  -u          Unicode mode (box drawing + blocks) [default]\n");
@@ -467,13 +531,12 @@ static void usage(const char *prog) {
     printf("  -k K        Use minute K directly (ignores system time)\n\n");
     printf("Examples:\n");
     printf("  %s                    # Live clock\n", prog);
-    printf("  %s -k 12345 -n 60     # Generate 60 frames for minute 12345\n", prog);
+    printf("  %s -n 60 -s | %s -i   # Round-trip test (simulate 60 frames)\n", prog, prog);
     printf("  %s -a -f 1246FPT      # ASCII with custom fills\n", prog);
-    printf("  %s -i < frames.txt    # Decode frames, output k\n", prog);
 }
 
 int main(int argc, char **argv) {
-    int unicode = 1, distinct = 0, inverse = 0, live_inplace = 0;
+    int unicode = 1, distinct = 0, inverse = 0, live_inplace = 0, simulate = 0;
     time_t origin = 0;  /* Unix epoch default, same as webpage */
     int64_t fixed_k = -1;  /* -1 means use system time */
     int64_t num_frames = -1;  /* -1 means infinite (live mode) */
@@ -484,6 +547,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-u") == 0) unicode = 1;
         else if (strcmp(argv[i], "-d") == 0) distinct = 1;
         else if (strcmp(argv[i], "-l") == 0) live_inplace = 1;
+        else if (strcmp(argv[i], "-s") == 0) simulate = 1;
         else if (strcmp(argv[i], "-i") == 0) inverse = 1;
         else if (strcmp(argv[i], "-f") == 0 && i+1 < argc)
             fill_chars = argv[++i];
@@ -508,22 +572,29 @@ int main(int argc, char **argv) {
     signal(SIGTERM, handle_signal);
 #endif
 
+    time_t start_time = time(NULL);
+    int64_t start_elapsed = start_time - origin;
+
     uint64_t frame = 0;
     while (running && (num_frames < 0 || frame < (uint64_t)num_frames)) {
-        time_t now = time(NULL);
+        int64_t virtual_elapsed;
         uint64_t k;
         int sec;
 
-        if (fixed_k >= 0) {
-            /* Demo mode: cycle through seconds for fixed k */
-            k = (uint64_t)fixed_k;
-            sec = (int)(frame % 60);
+        if (simulate) {
+            /* Simulation: advance virtual time by frame number */
+            virtual_elapsed = start_elapsed + (int64_t)frame;
         } else {
-            /* Live mode: use system time relative to origin */
-            time_t elapsed = now - origin;
-            k = (uint64_t)(elapsed / 60);
-            sec = (int)(elapsed % 60);
+            /* Live: use actual current time */
+            virtual_elapsed = time(NULL) - origin;
         }
+
+        if (fixed_k >= 0) {
+            k = (uint64_t)fixed_k;
+        } else {
+            k = (uint64_t)(virtual_elapsed / 60);
+        }
+        sec = (int)(virtual_elapsed % 60);
 
         int idx = perm_index(k, sec);
         uint8_t mask = COMBOS[sec][idx];
@@ -534,33 +605,21 @@ int main(int argc, char **argv) {
         render(mask);
 
         frame++;
-        if (num_frames < 0) SLEEP_MS(1000);  /* Only sleep in live mode */
+        if (!simulate) {
+            /* Sleep until next second (efficient, no drift) */
+            time_t current = time(NULL);
+            do {
+                SLEEP_MS(1000 - get_milliseconds());
+            } while (time(NULL) == current && running);
+        }
     }
 
-    /* On exit, print timestamps in ISO 8601 format */
-    time_t end_time = time(NULL);
-    struct tm local_tm = {0}, utc_tm = {0};
-    struct tm *tmp = localtime(&end_time);
-    if (tmp) local_tm = *tmp;
-    tmp = gmtime(&end_time);
-    if (tmp) utc_tm = *tmp;
-
-    /* Compute timezone offset */
-    int off_min = (local_tm.tm_hour - utc_tm.tm_hour) * 60 +
-                  (local_tm.tm_min - utc_tm.tm_min);
-    /* Handle day boundary */
-    if (local_tm.tm_mday != utc_tm.tm_mday) {
-        off_min += (local_tm.tm_mday > utc_tm.tm_mday ||
-                   (local_tm.tm_mon > utc_tm.tm_mon) ||
-                   (local_tm.tm_year > utc_tm.tm_year)) ? 1440 : -1440;
-    }
-    int off_h = off_min / 60;
-    int off_m = (off_min < 0 ? -off_min : off_min) % 60;
-
-    fprintf(stderr, "\n%04d-%02d-%02dT%02d:%02d:%02d%+03d:%02d\n",
-           local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday,
-           local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec,
-           off_h, off_m);
+    /* Output start timestamp for inverse mode (ISO 8601 UTC) */
+    printf("\n");  /* Newline after ^C */
+    struct tm *ts_utc = gmtime(&start_time);
+    printf("%04d-%02d-%02dT%02d:%02d:%02dZ\n",
+           ts_utc->tm_year + 1900, ts_utc->tm_mon + 1, ts_utc->tm_mday,
+           ts_utc->tm_hour, ts_utc->tm_min, ts_utc->tm_sec);
 
     return 0;
 }

@@ -297,12 +297,56 @@ def inverse_from_observations(observed_cells_list):
     return k, indices
 
 
+def verify_k_spanning(k, seconds_observed, start_second):
+    """
+    Verify k against observations that span two minutes.
+
+    When start_second > 0:
+    - Seconds 0..start_second-1 come from minute k
+    - Seconds start_second..59 come from minute k-1
+
+    Returns match count (0-60).
+    """
+    indices_k = perm(k)
+    indices_k_minus_1 = perm(k - 1) if k > 0 else perm(PERIOD - 1)
+
+    matches = 0
+    for second in range(60):
+        if second not in seconds_observed:
+            continue
+        cells = seconds_observed[second]
+        idx = find_combination_index(second, cells)
+        if idx < 0:
+            continue
+
+        # Determine which minute this second belongs to
+        if start_second == 0:
+            # All from same minute k
+            expected_idx = indices_k[second]
+        elif second < start_second:
+            # Seconds 0..start_second-1 are from minute k
+            expected_idx = indices_k[second]
+        else:
+            # Seconds start_second..59 are from minute k-1
+            expected_idx = indices_k_minus_1[second]
+
+        if idx == expected_idx:
+            matches += 1
+
+    return matches
+
+
 def find_k_from_observations(observed_cells_list, min_match_ratio=0.9):
     """
     Given observed cell sets, compute the minute identifier k.
 
     Uses sum-based second detection: cells shown at second S always sum to S.
     This eliminates the need to try 60 rotations.
+
+    When observations span two minutes (start_second > 0):
+    - Seconds start_second..59 come from minute k-1
+    - Seconds 0..start_second-1 come from minute k
+    k is the minute containing second 0.
 
     Args:
         observed_cells_list: list of observed cell sets (one per frame/sample)
@@ -314,44 +358,79 @@ def find_k_from_observations(observed_cells_list, min_match_ratio=0.9):
     min_matches = int(60 * min_match_ratio)
 
     # Build observations indexed by clock second (using sum-based detection)
+    # Note: empty set [] is valid for second 0 (all cells off), so don't skip it
     seconds_observed = {}  # clock_second -> observed_cells
     start_second = None
+    seen_second_0 = False  # Track if we've seen a real second 0
 
     for i, cells in enumerate(observed_cells_list):
         clock_second = cells_to_second(cells)
         if i == 0:
             start_second = clock_second
         if clock_second not in seconds_observed:
+            # For second 0: only accept first occurrence (avoid padding pollution)
+            if clock_second == 0:
+                if seen_second_0:
+                    continue  # Skip duplicate second 0 (likely padding)
+                seen_second_0 = True
             seconds_observed[clock_second] = cells
 
     # Check how many of the 60 seconds we have
     if len(seconds_observed) < min_matches:
         return None, None, len(seconds_observed)
 
-    # Build indices array for inversion
+    # Build indices array for inversion (mixed from two minutes if start_second > 0)
     indices = []
-    matches = 0
-
     for second in range(60):
         if second in seconds_observed:
             cells = seconds_observed[second]
             idx = find_combination_index(second, cells)
-            if idx >= 0:
-                matches += 1
-                indices.append(idx)
-            else:
-                indices.append(0)  # Fallback
+            indices.append(idx if idx >= 0 else 0)
         else:
-            indices.append(0)  # Missing second, use default
+            indices.append(0)
 
-    if matches < min_matches:
+    # Get initial candidate from mixed reconstruction
+    k_candidate = inverse_perm(indices)
+    if k_candidate is None:
+        return None, None, 0
+
+    # If start_second == 0, all observations are from same minute - simple case
+    if start_second == 0:
+        matches = verify_k_spanning(k_candidate, seconds_observed, start_second)
+        if matches >= min_matches:
+            return start_second, k_candidate, matches
         return None, None, matches
 
-    k = inverse_perm(indices)
-    if k is not None:
-        return start_second, k, matches
+    # When start_second > 0, observations span two minutes
+    # The mixed reconstruction gives approximately k (minute of second 0)
+    # Try candidates around it to find the best match
+    best_k = None
+    best_matches = 0
 
-    return None, None, matches
+    # Search around k_candidate, and also around 0 (for wrap-around edge case)
+    search_centers = [k_candidate, 0]
+
+    for center in search_centers:
+        for delta in range(100):
+            for candidate in [center + delta, center - delta]:
+                if delta == 0 and candidate != center:
+                    continue
+                candidate = candidate % PERIOD
+                matches = verify_k_spanning(candidate, seconds_observed, start_second)
+                if matches > best_matches:
+                    best_matches = matches
+                    best_k = candidate
+                # Perfect match - return immediately
+                if matches == len(seconds_observed):
+                    return start_second, candidate, matches
+            # If we've found a perfect match searching this center, stop
+            if best_matches == len(seconds_observed):
+                break
+
+    if best_k is not None and best_matches >= min_matches:
+        return start_second, best_k, best_matches
+
+    return None, None, best_matches
 
 
 # For testing

@@ -39,6 +39,20 @@ def parse_timestamp(timestamp_str):
     raise ValueError(f"Cannot parse timestamp: {timestamp_str}")
 
 
+def format_ancient_date(year, month, day, hour, minute, second):
+    """Format a date that may be before year 1, using ISO 8601 extended format.
+    Year 0 = 1 B.C., Year -1 = 2 B.C., etc.
+    Negative years use the format: -YYYY-MM-DD (ISO 8601 extended)
+    """
+    if year >= 1:
+        return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+    elif year == 0:
+        return f"0000-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+    else:
+        # Negative year: -1 -> -0001, -10 -> -0010, etc.
+        return f"-{abs(year):04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+
+
 def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_offset_ms=None):
     """
     Compute when the clock was originally started.
@@ -50,7 +64,7 @@ def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_of
         minute_boundary_offset_ms: if available, precise offset from video start to minute boundary
 
     Returns:
-        (clock_origin datetime, sub_second_offset_ms for precision indication)
+        (clock_origin datetime or string for ancient dates, sub_second_offset_ms for precision indication)
     """
     if minute_boundary_offset_ms is not None:
         # Use precise minute boundary from second 0 detection
@@ -60,26 +74,117 @@ def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_of
         if sub_second_ms > 500:
             sub_second_ms -= 1000  # Normalize to -500 to +500
     else:
-        # Fallback: estimate from rotation offset
+        # Fallback: estimate when current minute's second 0 occurred
+        # If video starts at second S, second 0 was S seconds ago
         minute_start = video_timestamp - timedelta(seconds=rotation_offset)
         sub_second_ms = 0
 
-    # The clock has been running for k minutes since epoch
+    # When video spans two minutes (rotation_offset > 0), k is the NEXT minute
+    # (containing second 0 we observe), so use k-1 for the current minute
+    effective_k = k - 1 if rotation_offset > 0 else k
+
+    # The clock has been running for effective_k minutes since epoch
     # Use days to avoid overflow with large k values
-    days = k // (60 * 24)
-    remaining_minutes = k % (60 * 24)
-    clock_origin = minute_start - timedelta(days=days, minutes=remaining_minutes)
+    days = effective_k // (60 * 24)
+    remaining_minutes = effective_k % (60 * 24)
 
-    # Round to nearest second if sub-second offset is significant
-    if abs(sub_second_ms) >= 400:
-        # Round to nearest second
-        if sub_second_ms > 0:
-            clock_origin = clock_origin + timedelta(milliseconds=1000 - sub_second_ms)
+    try:
+        clock_origin = minute_start - timedelta(days=days, minutes=remaining_minutes)
+
+        # Round to nearest second if sub-second offset is significant
+        if abs(sub_second_ms) >= 400:
+            # Round to nearest second
+            if sub_second_ms > 0:
+                clock_origin = clock_origin + timedelta(milliseconds=1000 - sub_second_ms)
+            else:
+                clock_origin = clock_origin - timedelta(milliseconds=abs(sub_second_ms))
+            sub_second_ms = 0
+
+        return clock_origin, sub_second_ms
+    except OverflowError:
+        # Date is before year 1 (B.C.) - compute manually
+        # Convert minute_start to total minutes since year 1
+        # Make minute_start timezone-naive for comparison
+        if hasattr(minute_start, 'tzinfo') and minute_start.tzinfo is not None:
+            # Convert to UTC and make naive
+            from datetime import timezone
+            minute_start_naive = minute_start.astimezone(timezone.utc).replace(tzinfo=None)
         else:
-            clock_origin = clock_origin - timedelta(milliseconds=abs(sub_second_ms))
-        sub_second_ms = 0
+            minute_start_naive = minute_start
 
-    return clock_origin, sub_second_ms
+        year1_epoch = datetime(1, 1, 1, 0, 0, 0)
+        minutes_since_year1 = int((minute_start_naive - year1_epoch).total_seconds() / 60)
+        origin_minutes = minutes_since_year1 - effective_k
+
+        # Convert back to date components
+        # Negative origin_minutes means we're before year 1
+        if origin_minutes >= 0:
+            # Should not happen if we got OverflowError, but handle it
+            origin_dt = year1_epoch + timedelta(minutes=origin_minutes)
+            return origin_dt, sub_second_ms
+
+        # Calculate date before year 1 using exact day calculation
+        minutes_per_day = 60 * 24  # 1440
+
+        def is_leap_year(y):
+            """Proleptic Gregorian leap year (works for year <= 0)
+            In ISO 8601 / astronomical year numbering:
+            year 0 = 1 BC, year -1 = 2 BC, etc.
+            Leap years: divisible by 4, except centuries unless divisible by 400
+            """
+            # For negative years, use the astronomical convention directly
+            # Year 0 mod 4 = 0, so year 0 is a leap year
+            return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+
+        def days_in_year(y):
+            return 366 if is_leap_year(y) else 365
+
+        # Go back through years one at a time to handle varying year lengths
+        abs_minutes = abs(origin_minutes)
+        origin_year = 0  # Start from year 0 (one before year 1)
+        remaining_minutes = abs_minutes
+
+        # Subtract year by year until remaining_minutes <= one year
+        while True:
+            year_minutes = days_in_year(origin_year) * minutes_per_day
+            if remaining_minutes <= year_minutes:
+                break
+            remaining_minutes -= year_minutes
+            origin_year -= 1
+
+        # remaining_minutes is time from END of origin_year going backward
+        # If remaining == year length, we're at Jan 1 00:00 of origin_year
+        # Convert to time from START of origin_year
+        if remaining_minutes == year_minutes:
+            minutes_from_start = 0  # Exactly at start of year
+        else:
+            minutes_from_start = year_minutes - remaining_minutes
+
+        # Calculate day/time within the year
+        days_into_year = int(minutes_from_start // minutes_per_day)
+        remaining = int(minutes_from_start % minutes_per_day)
+        hours = remaining // 60
+        minutes = remaining % 60
+
+        # Convert day-of-year to month/day (proleptic Gregorian)
+        month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        if is_leap_year(origin_year):
+            month_days[1] = 29  # February has 29 days in leap year
+        day_of_year = days_into_year
+        month = 1
+        for m, mdays in enumerate(month_days, 1):
+            if day_of_year < mdays:
+                month = m
+                day = day_of_year + 1
+                break
+            day_of_year -= mdays
+        else:
+            month = 12
+            day = 31
+
+        # Return as formatted string for ancient dates
+        origin_str = format_ancient_date(origin_year, month, day, hours, minutes, 0)
+        return origin_str, sub_second_ms
 
 
 def main():
@@ -147,7 +252,12 @@ def main():
         print(f"Error analyzing video: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Extracted {len(observations)} seconds of cell observations")
+    real_obs = metadata.get('real_observations', len(observations))
+    print(f"Extracted {real_obs}/60 seconds of cell observations")
+
+    # Warn if coverage is too low
+    if real_obs < 54:
+        print(f"  WARNING: Low coverage ({real_obs}/60) - results may be unreliable", file=sys.stderr)
 
     # Report corrections
     if metadata.get('corrected_frames', 0) > 0:
@@ -187,6 +297,28 @@ def main():
     print(f"  Video started at second: {start_second}")
     print(f"  Minute identifier (k): {k}")
 
+    # Correct video timestamp using detected second (±30s tolerance)
+    # The detected second tells us exactly where in the minute cycle we are
+    ts_second = video_timestamp.second
+    ts_microsecond = video_timestamp.microsecond
+    correction_seconds = start_second - ts_second
+    if correction_seconds > 30:
+        correction_seconds -= 60  # wrap backward
+    elif correction_seconds < -30:
+        correction_seconds += 60  # wrap forward
+
+    # Total correction includes zeroing sub-second part
+    correction_ms = correction_seconds * 1000 - ts_microsecond // 1000
+
+    if correction_seconds != 0 or ts_microsecond > 0:
+        video_timestamp = video_timestamp + timedelta(seconds=correction_seconds)
+        # Zero out microseconds since we're snapping to second boundary
+        video_timestamp = video_timestamp.replace(microsecond=0)
+        # After correction, video_timestamp now matches detected second exactly,
+        # so we don't need minute_boundary_offset_ms (which was relative to original timestamp)
+        minute_boundary_offset_ms = None
+        print(f"  Timestamp corrected by {correction_ms:+d}ms (detected second: {start_second})")
+
     # Verify with main observations
     if args.verbose:
         expected = get_all_cells_for_minute(k)
@@ -216,17 +348,25 @@ def main():
     if years_elapsed >= 1:
         print(f", {years_elapsed:,.1f} years", end="")
     print(")")
-    # Convert to UTC for display (clock now uses UTC origin)
-    if hasattr(clock_origin, 'tzinfo') and clock_origin.tzinfo is not None:
-        from datetime import timezone
-        clock_origin_utc = clock_origin.astimezone(timezone.utc)
-    else:
-        clock_origin_utc = clock_origin
+    # Display clock origin
     print(f"\nClock origin (UTC):")
-    if sub_second_ms != 0:
-        print(f"  {format_timestamp(clock_origin_utc)} ({sub_second_ms:+d}ms)")
+    if isinstance(clock_origin, str):
+        # Ancient date - already formatted as string with B.C. notation
+        if sub_second_ms != 0:
+            print(f"  {clock_origin} ({sub_second_ms:+d}ms)")
+        else:
+            print(f"  {clock_origin}")
     else:
-        print(f"  {format_timestamp(clock_origin_utc)}")
+        # Normal datetime - convert to UTC for display
+        if hasattr(clock_origin, 'tzinfo') and clock_origin.tzinfo is not None:
+            from datetime import timezone
+            clock_origin_utc = clock_origin.astimezone(timezone.utc)
+        else:
+            clock_origin_utc = clock_origin
+        if sub_second_ms != 0:
+            print(f"  {format_timestamp(clock_origin_utc)} ({sub_second_ms:+d}ms)")
+        else:
+            print(f"  {format_timestamp(clock_origin_utc)}")
 
     print(f"\nNote: The clock period is {PERIOD:,} minutes")
     print(f"      (>{PERIOD / (60 * 24 * 365.25) / 1e9:.0f} billion years)")
