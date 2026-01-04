@@ -1,14 +1,14 @@
 # Mondrian Terminal Clock
 # Compile: make
-# Windows: cl clock.c /Fe:clock.exe (Visual Studio) or gcc on MinGW
+# Windows: cl now.c /Fe:now.exe (Visual Studio) or gcc on MinGW
 
 CC = gcc
 CFLAGS = -Os -Wall -s
 
-clock: clock.c
+now: now.c
 	$(CC) $(CFLAGS) -o $@ $<
 
 clean:
-	rm -f clock clock.exe
+	rm -f now now.exe
 
 .PHONY: clean

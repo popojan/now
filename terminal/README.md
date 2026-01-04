@@ -5,7 +5,7 @@ A terminal-based Mondrian clock that displays the same patterns as the [web vers
 ## Features
 
 - ASCII and Unicode display modes
-- 3-color graph coloring for distinguishable cell fills
+- 4-color graph coloring for distinguishable cell fills
 - Custom fill characters
 - Inverse mode to decode frames back to minute number
 - Cross-platform (Linux, macOS, Windows)
@@ -18,13 +18,13 @@ make
 
 Or directly:
 ```bash
-gcc -Os -Wall -s -o clock clock.c
+gcc -Os -Wall -s -o now now.c
 ```
 
 ## Usage
 
 ```
-./clock [options]
+./now [options]
 
 Modes:
   (default)   Run clock, display frames (1/sec), scrolling output
@@ -35,7 +35,7 @@ Modes:
 Display:
   -a          ASCII mode (.|'#)
   -u          Unicode mode (box drawing + blocks) [default]
-  -d          Distinct fills (3-color graph coloring)
+  -d          Distinct fills (4-color graph coloring)
   -f CHARS    Custom fill chars for cells 1,2,4,6,12,15,20 (7 chars)
 
 Time:
@@ -47,34 +47,34 @@ Time:
 
 Live clock with Unicode (scrolling):
 ```bash
-./clock
+./now
 ```
 
 Live clock with in-place updates:
 ```bash
-./clock -l
+./now -l
 ```
 
 Generate 60 frames for minute 12345 in ASCII:
 ```bash
-./clock -a -k 12345 -n 60
+./now -a -k 12345 -n 60
 ```
 
 Round-trip test (generate frames, decode back):
 ```bash
-./clock -a -k 12345 -n 60 | ./clock -i
+./now -a -k 12345 -n 60 | ./now -i
 ```
 
 Output:
 ```
 Minute (k): 12345
 Rotation: 0 (first frame was second 0)
-Origin: 1970-01-09 10:45:00 (local) = 1970-01-09T09:45:00Z
+Origin: 1970-01-09T10:45:00+01:00
 ```
 
-Distinct colors mode (3-color graph coloring):
+Distinct colors mode (4-color graph coloring):
 ```bash
-./clock -a -d
+./now -a -d
 ```
 
 ## How It Works

@@ -46,27 +46,11 @@ The clock's period is **(2^30) × (3^16) = 46,221,064,723,759,104 minutes**, whi
 
 ## Project Structure
 
-```
-now/
-├── web/
-│   └── index.html      # The clock webpage
-├── terminal/
-│   ├── clock.c         # Terminal clock (C, cross-platform)
-│   ├── Makefile
-│   └── README.md       # Terminal clock documentation
-├── inverse/
-│   ├── main.py         # CLI tool to decode clock videos
-│   ├── clock_inverse.py    # Core inversion algorithm
-│   ├── video_analyzer.py   # OpenCV video processing
-│   ├── metadata.py     # Video timestamp extraction
-│   ├── requirements.txt
-│   └── STREAMING.md    # Future iOS app design notes
-├── test_videos/        # Test videos (Git LFS)
-│   └── README.md       # Video documentation
-└── README.md
-```
+- `web/` - Clock webpage (HTML/CSS/JS)
+- `terminal/` - C terminal implementation
+- `inverse/` - Python video decoder
 
-**Note**: Test videos are stored with Git LFS. Run `git lfs pull` after cloning.
+**Note**: Test videos (`test_videos/`) are stored with Git LFS. Run `git lfs pull` after cloning.
 
 ## Terminal Clock
 
@@ -79,14 +63,14 @@ See [terminal/README.md](terminal/README.md) for full documentation.
 ```bash
 cd terminal
 make
-./clock              # Live clock
-./clock -a -d        # ASCII with 3-color distinction
+./now              # Live clock
+./now -a -d        # ASCII with 4-color distinction
 ```
 
 ### Round-trip Test
 
 ```bash
-./clock -a -k 12345 -n 60 | ./clock -i
+./now -a -k 12345 -n 60 | ./now -i
 # Output: Minute (k): 12345
 ```
 
