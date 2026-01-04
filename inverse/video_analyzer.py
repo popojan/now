@@ -54,6 +54,159 @@ WARPED_WIDTH = 600
 WARPED_HEIGHT = 1000
 
 
+def create_grid_mask(width=120, height=200, line_thickness=3):
+    """
+    Create a binary mask of the clock's grid lines.
+
+    Grid lines are always black regardless of which cells are filled,
+    making this mask ideal for template matching.
+
+    Grid structure (normalized coordinates):
+        x=0   x=0.5  x=0.67  x=1
+        ┌────────────────┬──────┐ y=0
+        │      20        │  12  │
+        ├────────┬───┬───┤      │ y=0.5
+        │   15   │ 1 ├───┴──────┤ y=0.6
+        │        ├───┤    4     │
+        │        │ 2 ├──────────┤ y=0.8
+        │        │      6       │
+        └────────┴──────────────┘ y=1.0
+
+    Returns white background (255) with black lines (0).
+    """
+    mask = np.ones((height, width), dtype=np.uint8) * 255
+
+    def vline(x_ratio, y_start, y_end):
+        x = int(x_ratio * width)
+        y1 = int(y_start * height)
+        y2 = int(y_end * height)
+        cv2.line(mask, (x, y1), (x, y2), 0, line_thickness)
+
+    def hline(y_ratio, x_start, x_end):
+        y = int(y_ratio * height)
+        x1 = int(x_start * width)
+        x2 = int(x_end * width)
+        cv2.line(mask, (x1, y), (x2, y), 0, line_thickness)
+
+    # Outer border
+    cv2.rectangle(mask, (0, 0), (width-1, height-1), 0, line_thickness)
+
+    # Vertical lines
+    vline(4/6, 0, 0.6)      # Between 20|12
+    vline(3/6, 0.5, 1.0)    # Between 15|1,2,6 (extends to bottom)
+    vline(4/6, 0.6, 0.8)    # Between 1,2|4
+
+    # Horizontal lines
+    hline(0.5, 0, 4/6)      # Below 20
+    hline(0.6, 3/6, 1.0)    # Below 1, separates 12|4
+    hline(0.8, 3/6, 1.0)    # Below 2 and 4
+
+    return mask
+
+
+def validate_grid_structure(warped_frame, threshold=0.5):
+    """
+    Validate that a warped frame contains clock grid structure.
+
+    After perspective correction, the grid lines should align with
+    expected positions. This checks for dark pixels along grid lines.
+
+    Args:
+        warped_frame: perspective-corrected frame (WARPED_WIDTH x WARPED_HEIGHT)
+        threshold: minimum ratio of dark pixels on grid lines (0-1)
+
+    Returns:
+        (is_valid, score) where score is the grid line match quality
+    """
+    gray = cv2.cvtColor(warped_frame, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+
+    # Expected grid line positions (normalized)
+    # Vertical lines
+    vlines = [
+        (4/6, 0, 0.6),      # Between 20|12
+        (3/6, 0.5, 1.0),    # Between 15|1,2,6
+        (4/6, 0.6, 0.8),    # Between 1,2|4
+    ]
+    # Horizontal lines
+    hlines = [
+        (0.5, 0, 4/6),      # Below 20
+        (0.6, 3/6, 1.0),    # Below 1
+        (0.8, 3/6, 1.0),    # Below 2 and 4
+    ]
+
+    dark_threshold = 100  # Pixels darker than this are "dark"
+    line_width = max(3, int(w * 0.02))  # Sample width around line
+
+    total_samples = 0
+    dark_samples = 0
+
+    # Check vertical lines
+    for x_ratio, y_start, y_end in vlines:
+        x = int(x_ratio * w)
+        y1 = int(y_start * h)
+        y2 = int(y_end * h)
+
+        for y in range(y1, y2, 5):  # Sample every 5 pixels
+            x_start = max(0, x - line_width // 2)
+            x_end = min(w, x + line_width // 2)
+            region = gray[y:y+1, x_start:x_end]
+            if region.size > 0:
+                total_samples += 1
+                if np.min(region) < dark_threshold:
+                    dark_samples += 1
+
+    # Check horizontal lines
+    for y_ratio, x_start_ratio, x_end_ratio in hlines:
+        y = int(y_ratio * h)
+        x1 = int(x_start_ratio * w)
+        x2 = int(x_end_ratio * w)
+
+        for x in range(x1, x2, 5):
+            y_start = max(0, y - line_width // 2)
+            y_end = min(h, y + line_width // 2)
+            region = gray[y_start:y_end, x:x+1]
+            if region.size > 0:
+                total_samples += 1
+                if np.min(region) < dark_threshold:
+                    dark_samples += 1
+
+    # Check outer border
+    border_samples = 0
+    border_dark = 0
+    for i in range(0, w, 5):
+        # Top edge
+        if gray[0:line_width, i:i+1].size > 0:
+            border_samples += 1
+            if np.min(gray[0:line_width, i:i+1]) < dark_threshold:
+                border_dark += 1
+        # Bottom edge
+        if gray[h-line_width:h, i:i+1].size > 0:
+            border_samples += 1
+            if np.min(gray[h-line_width:h, i:i+1]) < dark_threshold:
+                border_dark += 1
+    for i in range(0, h, 5):
+        # Left edge
+        if gray[i:i+1, 0:line_width].size > 0:
+            border_samples += 1
+            if np.min(gray[i:i+1, 0:line_width]) < dark_threshold:
+                border_dark += 1
+        # Right edge
+        if gray[i:i+1, w-line_width:w].size > 0:
+            border_samples += 1
+            if np.min(gray[i:i+1, w-line_width:w]) < dark_threshold:
+                border_dark += 1
+
+    total_samples += border_samples
+    dark_samples += border_dark
+
+    if total_samples == 0:
+        return False, 0
+
+    score = dark_samples / total_samples
+    return score >= threshold, score
+
+
 def extract_frames(video_path):
     """
     Extract all frames from video.
@@ -113,74 +266,218 @@ def order_corners(pts):
     return np.array([top_left, top_right, bottom_right, bottom_left], dtype=np.float32)
 
 
-def detect_clock_quadrilateral(frame):
+def refine_corners_with_edges(frame, initial_corners, margin=30):
     """
-    Detect the clock rectangle by finding edges and selecting best rectangle.
+    Refine corner positions by detecting the clock's black border lines.
 
-    Strategy:
-    1. Detect edges using Canny
-    2. Find all rectangular contours
-    3. Select the one with aspect ratio closest to 6:10
+    Uses Hough line detection within a region around the initial corners
+    to find the actual border lines and their intersections.
 
-    Returns 4 corner points ordered as: TL, TR, BR, BL
-    or None if not detected.
+    Args:
+        frame: BGR image
+        initial_corners: rough corner estimates (TL, TR, BR, BL)
+        margin: pixels to expand search region
+
+    Returns:
+        Refined corners or original if refinement fails
     """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
 
+    # Get bounding box of initial corners with margin
+    x_min = max(0, int(np.min(initial_corners[:, 0]) - margin))
+    x_max = min(w, int(np.max(initial_corners[:, 0]) + margin))
+    y_min = max(0, int(np.min(initial_corners[:, 1]) - margin))
+    y_max = min(h, int(np.max(initial_corners[:, 1]) + margin))
+
+    roi = gray[y_min:y_max, x_min:x_max]
+
     # Edge detection
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blurred, 30, 100)
+    edges = cv2.Canny(roi, 50, 150)
 
-    # Dilate edges to connect nearby lines
-    kernel = np.ones((3, 3), np.uint8)
-    edges = cv2.dilate(edges, kernel, iterations=2)
+    # Hough lines
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50,
+                            minLineLength=50, maxLineGap=10)
 
-    # Find contours
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if lines is None or len(lines) < 4:
+        return initial_corners
 
-    if not contours:
-        return None
+    # Classify lines as horizontal or vertical
+    horizontal_lines = []
+    vertical_lines = []
 
-    # Find rectangle with best aspect ratio match to 6:10
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        angle = np.abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi)
+
+        if angle < 30 or angle > 150:  # Horizontal-ish
+            horizontal_lines.append((x1 + x_min, y1 + y_min, x2 + x_min, y2 + y_min))
+        elif 60 < angle < 120:  # Vertical-ish
+            vertical_lines.append((x1 + x_min, y1 + y_min, x2 + x_min, y2 + y_min))
+
+    if len(horizontal_lines) < 2 or len(vertical_lines) < 2:
+        return initial_corners
+
+    # Find top, bottom, left, right border lines
+    # Sort horizontal by average y (top to bottom)
+    horizontal_lines.sort(key=lambda l: (l[1] + l[3]) / 2)
+    top_line = horizontal_lines[0]
+    bottom_line = horizontal_lines[-1]
+
+    # Sort vertical by average x (left to right)
+    vertical_lines.sort(key=lambda l: (l[0] + l[2]) / 2)
+    left_line = vertical_lines[0]
+    right_line = vertical_lines[-1]
+
+    def line_intersection(l1, l2):
+        """Find intersection of two lines given as (x1, y1, x2, y2)."""
+        x1, y1, x2, y2 = l1
+        x3, y3, x4, y4 = l2
+
+        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(denom) < 1e-6:
+            return None
+
+        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+
+        x = x1 + t * (x2 - x1)
+        y = y1 + t * (y2 - y1)
+        return (x, y)
+
+    # Find corner intersections
+    tl = line_intersection(top_line, left_line)
+    tr = line_intersection(top_line, right_line)
+    br = line_intersection(bottom_line, right_line)
+    bl = line_intersection(bottom_line, left_line)
+
+    if None in [tl, tr, br, bl]:
+        return initial_corners
+
+    refined = np.array([tl, tr, br, bl], dtype=np.float32)
+
+    # Sanity check: refined should be close to initial
+    distances = np.linalg.norm(refined - initial_corners, axis=1)
+    if np.max(distances) > margin * 2:
+        return initial_corners
+
+    return refined
+
+
+def detect_clock_candidates(frame, max_candidates=5):
+    """
+    Detect multiple candidate clock rectangles.
+
+    Strategy: Look for bright rectangular regions (clock on light background)
+    with dark internal borders (the black grid lines between cells).
+
+    Returns list of (corners, score) tuples, sorted by score (best first).
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+
+    candidates = []
     target_ratio = 6.0 / 10.0
-    best_rect = None
-    best_score = float('inf')
 
-    for cnt in contours:
+    # Method 1: Find bright regions (clock on light background like a webpage)
+    # Threshold to find bright areas
+    _, bright_mask = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
+
+    # Clean up the mask
+    kernel = np.ones((5, 5), np.uint8)
+    bright_mask = cv2.morphologyEx(bright_mask, cv2.MORPH_CLOSE, kernel)
+    bright_mask = cv2.morphologyEx(bright_mask, cv2.MORPH_OPEN, kernel)
+
+    contours_bright, _ = cv2.findContours(bright_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    for cnt in contours_bright:
         area = cv2.contourArea(cnt)
-        if area < 50000:
+        if area < 10000:
             continue
 
-        # Get bounding rectangle
         x, y, rw, rh = cv2.boundingRect(cnt)
-
-        if rw < 200 or rh < 200:
+        if rw < 80 or rh < 80:
             continue
 
         ratio = rw / rh
         ratio_error = abs(ratio - target_ratio)
+        if ratio_error > 0.4:
+            continue
 
-        # Score: prefer correct aspect ratio and larger area
+        # Check for dark lines inside (grid borders)
+        roi = gray[y:y+rh, x:x+rw]
+        dark_pixels = np.sum(roi < 80) / roi.size
+        # Clock should have some dark pixels (borders) but not too many
+        if dark_pixels < 0.02 or dark_pixels > 0.5:
+            continue
+
+        corners = np.array([
+            [x, y], [x + rw, y], [x + rw, y + rh], [x, y + rh]
+        ], dtype=np.float32)
+
+        # Score: prefer correct aspect ratio, larger area, and moderate dark content
+        score = ratio_error * 10 - area / 100000 - dark_pixels * 5
+        candidates.append((corners, score, "bright"))
+
+    # Method 2: Edge-based detection (original method as fallback)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 30, 100)
+    kernel = np.ones((3, 3), np.uint8)
+    edges = cv2.dilate(edges, kernel, iterations=2)
+
+    contours_edge, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    for cnt in contours_edge:
+        area = cv2.contourArea(cnt)
+        if area < 20000:
+            continue
+
+        x, y, rw, rh = cv2.boundingRect(cnt)
+        if rw < 100 or rh < 100:
+            continue
+
+        ratio = rw / rh
+        ratio_error = abs(ratio - target_ratio)
+        if ratio_error > 0.3:
+            continue
+
+        corners = np.array([
+            [x, y], [x + rw, y], [x + rw, y + rh], [x, y + rh]
+        ], dtype=np.float32)
+
         score = ratio_error * 10 - area / 100000
+        candidates.append((corners, score, "edge"))
 
-        if score < best_score:
-            best_score = score
-            best_rect = (x, y, rw, rh)
+    # Sort by score (lower is better) and deduplicate similar regions
+    candidates.sort(key=lambda x: x[1])
 
-    if best_rect is None:
-        return None
+    # Remove duplicates (overlapping regions)
+    unique = []
+    for corners, score, method in candidates:
+        is_dup = False
+        for uc, us, um in unique:
+            # Check if centers are close
+            c1 = np.mean(corners, axis=0)
+            c2 = np.mean(uc, axis=0)
+            if np.linalg.norm(c1 - c2) < 50:
+                is_dup = True
+                break
+        if not is_dup:
+            unique.append((corners, score, method))
 
-    x, y, rw, rh = best_rect
+    return [(c, s) for c, s, m in unique[:max_candidates]]
 
-    corners = np.array([
-        [x, y],            # TL
-        [x + rw, y],       # TR
-        [x + rw, y + rh],  # BR
-        [x, y + rh]        # BL
-    ], dtype=np.float32)
 
-    return corners
+def detect_clock_quadrilateral(frame):
+    """
+    Detect the clock rectangle by finding edges and selecting best rectangle.
+
+    Returns 4 corner points ordered as: TL, TR, BR, BL
+    or None if not detected.
+    """
+    candidates = detect_clock_candidates(frame, max_candidates=1)
+    if candidates:
+        return candidates[0][0]
+    return None
 
 
 def warp_to_rectangle(frame, quad_pts):
@@ -339,6 +636,164 @@ class VideoTooShortError(Exception):
     pass
 
 
+def shrink_quad(quad_pts, margin_ratio=0.02):
+    """Shrink a quadrilateral by a margin ratio to avoid including background."""
+    center = np.mean(quad_pts, axis=0)
+    shrunk = []
+    for pt in quad_pts:
+        direction = center - pt
+        new_pt = pt + direction * margin_ratio
+        shrunk.append(new_pt)
+    return np.array(shrunk, dtype=np.float32)
+
+
+def detect_empty_color(cell_colors):
+    """
+    Detect the empty (background) color from a list of cell color samples.
+
+    Returns the most frequent NEUTRAL (grayish/white) color, or brightest
+    color if no neutral found.
+    """
+    all_colors_array = np.array(cell_colors)
+    quantized = (all_colors_array // 20) * 20
+
+    color_counts = {}
+    for c in quantized:
+        key = tuple(c)
+        color_counts[key] = color_counts.get(key, 0) + 1
+
+    # Find neutral colors (R≈G≈B) and bright colors
+    neutral_candidates = []
+    bright_candidates = []
+
+    for key, count in color_counts.items():
+        b, g, r = int(key[0]), int(key[1]), int(key[2])
+        max_diff = max(abs(r-g), abs(g-b), abs(r-b))
+        brightness = (r + g + b) / 3
+
+        if max_diff < 60 and brightness > 150:  # Neutral and bright
+            neutral_candidates.append((key, count, brightness))
+        elif brightness > 180:  # Just bright (might be off-white)
+            bright_candidates.append((key, count, brightness))
+
+    if neutral_candidates:
+        neutral_candidates.sort(key=lambda x: (-x[1], -x[2]))
+        most_frequent = neutral_candidates[0][0]
+    elif bright_candidates:
+        bright_candidates.sort(key=lambda x: (-x[2], -x[1]))  # Prefer brightest
+        most_frequent = bright_candidates[0][0]
+    else:
+        # Fallback: most frequent overall
+        all_sorted = sorted(color_counts.items(), key=lambda x: -x[1])
+        most_frequent = all_sorted[0][0]
+
+    return np.array([v + 10 for v in most_frequent], dtype=np.uint8)
+
+
+def get_empty_color_candidates(cell_colors, max_candidates=3):
+    """Get multiple empty color candidates for validation testing."""
+    all_colors_array = np.array(cell_colors)
+    quantized = (all_colors_array // 20) * 20
+
+    color_counts = {}
+    for c in quantized:
+        key = tuple(c)
+        color_counts[key] = color_counts.get(key, 0) + 1
+
+    candidates = []
+    for key, count in color_counts.items():
+        b, g, r = int(key[0]), int(key[1]), int(key[2])
+        brightness = (r + g + b) / 3
+        max_diff = max(abs(r-g), abs(g-b), abs(r-b))
+        # Score: prefer bright, neutral colors
+        neutrality = 100 - max_diff
+        score = brightness + neutrality * 0.5 + count * 0.1
+        candidates.append((key, score))
+
+    candidates.sort(key=lambda x: -x[1])
+    return [np.array([v + 10 for v in c[0]], dtype=np.uint8)
+            for c in candidates[:max_candidates]]
+
+
+def validate_clock_candidate(frames, quad_pts, tolerance=80, sample_frames=20):
+    """
+    Validate a candidate clock region by checking if it produces valid clock readings
+    and monotonically increasing seconds.
+
+    Tries the original region and slightly shrunk versions to find best fit.
+    Returns (score, empty_color, best_quad) where score is validation quality.
+    Higher score = better candidate.
+    """
+    from clock_inverse import cells_to_second, find_combination_index, ORDERING
+
+    # Sample frames evenly across the video (more samples for better monotonicity check)
+    step = max(1, len(frames) // sample_frames)
+    sample_indices = list(range(0, len(frames), step))[:sample_frames]
+
+    best_score = -1
+    best_empty_color = None
+    best_quad = quad_pts
+
+    # Try original and shrunk versions
+    for margin in [0.0, 0.02, 0.04, 0.06]:
+        test_quad = shrink_quad(quad_pts, margin) if margin > 0 else quad_pts
+
+        # Warp sample frames
+        warped_samples = []
+        for i in sample_indices:
+            warped = warp_to_rectangle(frames[i], test_quad)
+            warped_samples.append(warped)
+
+        # Detect empty color from samples
+        all_cell_colors = []
+        for warped in warped_samples:
+            for cell_id in CELL_LAYOUT.keys():
+                color = sample_cell_color_warped(warped, cell_id)
+                all_cell_colors.append(color)
+
+        # Try multiple empty color candidates
+        empty_candidates = get_empty_color_candidates(all_cell_colors, max_candidates=3)
+
+        for empty_color in empty_candidates:
+            valid_count = 0
+            seen_seconds = set()
+            seconds_sequence = []
+
+            for warped in warped_samples:
+                visible = get_visible_cells_warped(warped, empty_color, tolerance)
+                clock_second = cells_to_second(visible)
+                idx = find_combination_index(clock_second, visible)
+
+                seconds_sequence.append(clock_second)
+                if idx >= 0:  # Valid combination
+                    valid_count += 1
+                    seen_seconds.add(clock_second)
+
+            # Count monotonicity (seconds should generally increase)
+            mono_count = 0
+            for i in range(1, len(seconds_sequence)):
+                prev, curr = seconds_sequence[i-1], seconds_sequence[i]
+                # Allow same (multiple frames per second) or +1 (next second)
+                # Also handle wrap-around at 60
+                if curr == prev or curr == (prev + 1) % 60:
+                    mono_count += 1
+
+            # Score: valid readings + monotonicity bonus + diversity
+            # Monotonicity is important - a real clock should advance in order
+            diversity_bonus = len(seen_seconds) * 0.3
+            mono_ratio = mono_count / max(1, len(seconds_sequence) - 1)
+            mono_bonus = mono_ratio * 5  # Strong weight for monotonicity
+
+            score = valid_count + diversity_bonus + mono_bonus
+
+            if score > best_score:
+                best_score = score
+                best_empty_color = empty_color
+                best_quad = test_quad
+
+    return best_score, best_empty_color, best_quad
+
+
 def analyze_video(video_path, tolerance=80, verbose=False):
     """
     Analyze a video and extract cell visibility for each second.
@@ -371,47 +826,94 @@ def analyze_video(video_path, tolerance=80, verbose=False):
     if len(frames) == 0:
         raise ValueError("No frames extracted from video")
 
-    # Detect clock quadrilateral from first frame
-    quad_pts = detect_clock_quadrilateral(frames[0])
+    # Detect multiple clock candidates and validate each
+    candidates = detect_clock_candidates(frames[0], max_candidates=5)
 
-    if quad_pts is None:
+    if not candidates:
         raise ValueError("Could not detect clock in video")
 
+    # Validate candidates to find the best one
+    best_quad_pts = None
+    best_score = -1
+    best_empty_color = None
+
     if verbose:
+        print(f"Found {len(candidates)} candidate regions, validating...")
+
+    for i, (quad_pts, _) in enumerate(candidates):
+        score, empty_color, adjusted_quad = validate_clock_candidate(frames, quad_pts, tolerance)
+        if verbose:
+            print(f"  Candidate {i+1}: score={score:.1f}, corners={quad_pts.astype(int).tolist()}")
+        if score > best_score:
+            best_score = score
+            best_quad_pts = adjusted_quad  # Use the adjusted quad from validation
+            best_empty_color = empty_color
+
+    if best_quad_pts is None:
+        raise ValueError("Could not detect clock in video")
+
+    quad_pts = best_quad_pts
+
+    if verbose:
+        print(f"Selected candidate with score {best_score:.1f}")
         print(f"Detected clock corners: {quad_pts.astype(int).tolist()}")
 
-    # First pass: warp all frames and collect cell colors
+    # Try corner refinement for better perspective correction
+    refined_corners = refine_corners_with_edges(frames[0], quad_pts, margin=50)
+
+    # Validate refinement by checking if warped frame produces valid readings
+    from clock_inverse import cells_to_second, find_combination_index
+
+    def count_valid_readings(corners_to_test, sample_frames):
+        """Count how many sample frames give valid clock readings."""
+        valid = 0
+        for i in sample_frames:
+            warped = warp_to_rectangle(frames[i], corners_to_test)
+            colors = [sample_cell_color_warped(warped, cid) for cid in CELL_LAYOUT.keys()]
+            test_empty = detect_empty_color(colors)
+            visible = get_visible_cells_warped(warped, test_empty, tolerance)
+            second = cells_to_second(visible)
+            if find_combination_index(second, visible) >= 0:
+                valid += 1
+        return valid
+
+    sample_idx = list(range(0, len(frames), max(1, len(frames)//10)))[:10]
+    original_valid = count_valid_readings(quad_pts, sample_idx)
+    refined_valid = count_valid_readings(refined_corners, sample_idx)
+
+    # Use refinement only if it improves or maintains valid readings
+    use_refinement = refined_valid >= original_valid
+
+    if verbose:
+        print(f"Refined corners: {refined_corners.astype(int).tolist()}")
+        print(f"Original valid: {original_valid}/10, Refined valid: {refined_valid}/10")
+        print(f"Using {'refined' if use_refinement else 'original'} corners")
+
+    if use_refinement:
+        # Track corners across frames for camera motion compensation
+        corner_history = [refined_corners.copy()]
+        prev_corners = refined_corners
+
+        for i in range(1, len(frames)):
+            refined = refine_corners_with_edges(frames[i], prev_corners, margin=30)
+            corner_history.append(refined.copy())
+            prev_corners = refined
+
+        if verbose:
+            drift = np.linalg.norm(corner_history[-1] - corner_history[0], axis=1)
+            print(f"Corner drift over video: {drift.astype(int).tolist()} px")
+    else:
+        # Use original corners for all frames (no tracking needed)
+        corner_history = [quad_pts.copy() for _ in range(len(frames))]
+
+    # Warp all frames using per-frame corners
     warped_frames = []
-    all_cell_colors = []  # List of (BGR) colors from all cells, all frames
-
     for i, frame in enumerate(frames):
-        frame_quad = detect_clock_quadrilateral(frame)
-        if frame_quad is None:
-            frame_quad = quad_pts
-
-        warped = warp_to_rectangle(frame, frame_quad)
+        warped = warp_to_rectangle(frame, corner_history[i])
         warped_frames.append(warped)
 
-        # Collect colors from all cells
-        for cell_id in CELL_LAYOUT.keys():
-            color = sample_cell_color_warped(warped, cell_id)
-            all_cell_colors.append(color)
-
-    # Find empty color: most frequent color cluster across all samples
-    # Quantize colors to reduce variations, then find mode
-    all_colors_array = np.array(all_cell_colors)
-    quantized = (all_colors_array // 20) * 20  # Quantize to 20-unit bins
-
-    # Count color occurrences
-    color_counts = {}
-    for c in quantized:
-        key = tuple(c)
-        color_counts[key] = color_counts.get(key, 0) + 1
-
-    # Most frequent quantized color - use bin center (+10) for more robust matching
-    # Averaging exact colors can shift towards filled colors
-    most_frequent = max(color_counts, key=color_counts.get)
-    empty_color = np.array([v + 10 for v in most_frequent], dtype=np.uint8)
+    # Use empty color from validation (already optimized)
+    empty_color = best_empty_color
 
     if verbose:
         print(f"Detected empty color: RGB({empty_color[2]}, {empty_color[1]}, {empty_color[0]})")

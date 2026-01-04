@@ -65,7 +65,10 @@ def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_of
         sub_second_ms = 0
 
     # The clock has been running for k minutes since epoch
-    clock_origin = minute_start - timedelta(minutes=k)
+    # Use days to avoid overflow with large k values
+    days = k // (60 * 24)
+    remaining_minutes = k % (60 * 24)
+    clock_origin = minute_start - timedelta(days=days, minutes=remaining_minutes)
 
     # Round to nearest second if sub-second offset is significant
     if abs(sub_second_ms) >= 400:
@@ -189,10 +192,11 @@ def main():
         expected = get_all_cells_for_minute(k)
         print("\nVerification (first 10 seconds):")
         for i in range(min(10, len(observations))):
-            expected_cells = sorted(expected[i])
+            clock_second = (start_second + i) % 60
+            expected_cells = sorted(expected[clock_second])
             observed_cells = sorted(observations[i])
             match = "OK" if set(expected_cells) == set(observed_cells) else "MISMATCH"
-            print(f"  Second {i}: expected {expected_cells}, observed {observed_cells} [{match}]")
+            print(f"  Second {clock_second}: expected {expected_cells}, observed {observed_cells} [{match}]")
 
     # Compute origin
     clock_origin, sub_second_ms = compute_clock_origin(video_timestamp, start_second, k, minute_boundary_offset_ms)
