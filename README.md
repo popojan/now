@@ -44,8 +44,12 @@ now/
 │   ├── metadata.py     # Video timestamp extraction
 │   ├── requirements.txt
 │   └── STREAMING.md    # Future iOS app design notes
+├── test_videos/        # Test videos (Git LFS)
+│   └── README.md       # Video documentation
 └── README.md
 ```
+
+**Note**: Test videos are stored with Git LFS. Run `git lfs pull` after cloning.
 
 ## Inverse Tool
 
@@ -106,6 +110,13 @@ Note: The clock period is 46,221,064,723,759,104 minutes
 2. **Rotation Search**: Try all 60 possible starting seconds to align observations
 3. **Bit Extraction**: Reconstruct the minute identifier (k) from observed patterns
 4. **Origin Calculation**: Subtract k minutes from video timestamp
+
+### Detection Features
+
+- **Hybrid detection**: Simple edge-based detection for quality videos, Hough-based corner tracking for tilted/moving videos
+- **Color-independent**: Works with any color scheme (standard colors, monochrome red, etc.)
+- **Sum-based seconds**: Cells shown at second S always sum to S, making detection FPS-independent
+- **Error correction**: Can fix single-cell detection errors using valid combination lookup
 
 ## URL Parameters
 
