@@ -1,0 +1,65 @@
+name: Build Terminal Clock
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            output: now-linux
+          - os: macos-latest
+            output: now-macos
+          - os: windows-latest
+            output: now-windows.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        run: cc -Os -Wall -o terminal/${{ matrix.output }} terminal/now.c
+
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: cl /O2 /Fe:terminal/${{ matrix.output }} terminal/now.c
+
+      - name: Test
+        run: terminal/${{ matrix.output }} -h
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: terminal/${{ matrix.output }}
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: terminal/${{ matrix.output }}
+          body: |
+            ## Terminal Clock (`now`)
+            - `now-linux` - Linux x86_64
+            - `now-macos` - macOS ARM64 (Apple Silicon)
+            - `now-windows.exe` - Windows x86_64
+
+            ## Video Analyzer (`mondrian-clock-analyzer`)
+            - `mondrian-clock-analyzer.exe` - Windows x86_64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
