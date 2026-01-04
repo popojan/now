@@ -467,6 +467,63 @@ def detect_clock_candidates(frame, max_candidates=5):
     return [(c, s) for c, s, m in unique[:max_candidates]]
 
 
+def detect_clock_simple(frame):
+    """
+    Simple clock detection - edge-based contour detection.
+    Works well for axis-aligned, quality videos.
+
+    Returns 4 corner points ordered as: TL, TR, BR, BL
+    or None if not detected.
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Edge detection
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 30, 100)
+
+    # Dilate edges to connect nearby lines
+    kernel = np.ones((3, 3), np.uint8)
+    edges = cv2.dilate(edges, kernel, iterations=2)
+
+    # Find contours
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours:
+        return None
+
+    # Find rectangle with best aspect ratio match to 6:10
+    target_ratio = 6.0 / 10.0
+    best_rect = None
+    best_score = float('inf')
+
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < 50000:
+            continue
+
+        x, y, rw, rh = cv2.boundingRect(cnt)
+        if rw < 200 or rh < 200:
+            continue
+
+        ratio = rw / rh
+        ratio_error = abs(ratio - target_ratio)
+        score = ratio_error * 10 - area / 100000
+
+        if score < best_score:
+            best_score = score
+            best_rect = (x, y, rw, rh)
+
+    if best_rect is None:
+        return None
+
+    x, y, rw, rh = best_rect
+    corners = np.array([
+        [x, y], [x + rw, y], [x + rw, y + rh], [x, y + rh]
+    ], dtype=np.float32)
+
+    return corners
+
+
 def detect_clock_quadrilateral(frame):
     """
     Detect the clock rectangle by finding edges and selecting best rectangle.
@@ -858,113 +915,167 @@ def analyze_video(video_path, tolerance=80, verbose=False):
         print(f"Selected candidate with score {best_score:.1f}")
         print(f"Detected clock corners: {quad_pts.astype(int).tolist()}")
 
-    # Try corner refinement for better perspective correction
-    refined_corners = refine_corners_with_edges(frames[0], quad_pts, margin=50)
+    from clock_inverse import cells_to_second, find_combination_index, validate_observation
 
-    # Validate refinement by checking if warped frame produces valid readings
-    from clock_inverse import cells_to_second, find_combination_index
+    # Store simple-detected corners for simple detection fallback
+    original_quad = detect_clock_simple(frames[0])
+    if original_quad is None:
+        original_quad = candidates[0][0] if candidates else quad_pts
 
-    def count_valid_readings(corners_to_test, sample_frames):
-        """Count how many sample frames give valid clock readings."""
-        valid = 0
-        for i in sample_frames:
-            warped = warp_to_rectangle(frames[i], corners_to_test)
-            colors = [sample_cell_color_warped(warped, cid) for cid in CELL_LAYOUT.keys()]
-            test_empty = detect_empty_color(colors)
-            visible = get_visible_cells_warped(warped, test_empty, tolerance)
-            second = cells_to_second(visible)
-            if find_combination_index(second, visible) >= 0:
-                valid += 1
-        return valid
+    def run_simple_detection(frames, tolerance, verbose=False):
+        """
+        Simple detection approach: per-frame contour detection with fallback.
+        This works well for quality, axis-aligned videos.
+        Returns (second_to_frame, unique_count, empty_color, corner_history).
+        """
+        # Re-detect corners on each frame (like old version)
+        corner_history = []
+        warped_frames = []
+        all_cell_colors = []
 
-    sample_idx = list(range(0, len(frames), max(1, len(frames)//10)))[:10]
-    original_valid = count_valid_readings(quad_pts, sample_idx)
-    refined_valid = count_valid_readings(refined_corners, sample_idx)
+        for i, frame in enumerate(frames):
+            frame_quad = detect_clock_simple(frame)
+            if frame_quad is None:
+                frame_quad = original_quad
+            corner_history.append(frame_quad.copy())
 
-    # Use refinement only if it improves or maintains valid readings
-    use_refinement = refined_valid >= original_valid
+            warped = warp_to_rectangle(frame, frame_quad)
+            warped_frames.append(warped)
+
+            # Collect colors from all cells
+            for cell_id in CELL_LAYOUT.keys():
+                color = sample_cell_color_warped(warped, cell_id)
+                all_cell_colors.append(color)
+
+        # Use quantized color detection across all frames (like old version)
+        all_colors_array = np.array(all_cell_colors)
+        quantized = (all_colors_array // 20) * 20
+        color_counts = {}
+        for c in quantized:
+            key = tuple(c)
+            color_counts[key] = color_counts.get(key, 0) + 1
+        most_frequent = max(color_counts, key=color_counts.get)
+        empty_color = np.array([v + 10 for v in most_frequent], dtype=np.uint8)
+
+        # Build second_to_frame with error correction
+        second_to_frame = {}
+        for frame_idx, warped in enumerate(warped_frames):
+            visible = get_visible_cells_warped(warped, empty_color, tolerance)
+            clock_second = cells_to_second(visible)
+
+            if clock_second not in second_to_frame:
+                idx = find_combination_index(clock_second, visible)
+                if idx >= 0:
+                    second_to_frame[clock_second] = (frame_idx, visible)
+                else:
+                    _, _, corrected = validate_observation(visible)
+                    if corrected is not None:
+                        corrected_second = cells_to_second(corrected)
+                        if corrected_second not in second_to_frame:
+                            second_to_frame[corrected_second] = (frame_idx, corrected)
+
+        return second_to_frame, len(second_to_frame), empty_color, corner_history
+
+    def run_hough_detection(frames, quad_pts, tolerance, verbose=False):
+        """
+        Hough-based detection: corner refinement + per-frame tracking.
+        This works well for tilted videos with camera motion.
+        Returns (second_to_frame, unique_count, empty_color, corner_history).
+        """
+        # Refine corners using Hough line detection
+        refined = refine_corners_with_edges(frames[0], quad_pts, margin=50)
+        corner_history = [refined.copy()]
+        prev = refined
+
+        # Track corners across all frames
+        for i in range(1, len(frames)):
+            refined = refine_corners_with_edges(frames[i], prev, margin=30)
+            corner_history.append(refined.copy())
+            prev = refined
+
+        # Warp all frames
+        warped_frames = []
+        all_cell_colors = []
+        for i, frame in enumerate(frames):
+            warped = warp_to_rectangle(frame, corner_history[i])
+            warped_frames.append(warped)
+            for cell_id in CELL_LAYOUT.keys():
+                all_cell_colors.append(sample_cell_color_warped(warped, cell_id))
+
+        # Detect empty color
+        empty_color = detect_empty_color(all_cell_colors)
+
+        # Build second_to_frame with error correction
+        second_to_frame = {}
+        for frame_idx, warped in enumerate(warped_frames):
+            visible = get_visible_cells_warped(warped, empty_color, tolerance)
+            clock_second = cells_to_second(visible)
+
+            if clock_second not in second_to_frame:
+                idx = find_combination_index(clock_second, visible)
+                if idx >= 0:
+                    second_to_frame[clock_second] = (frame_idx, visible)
+                else:
+                    _, _, corrected = validate_observation(visible)
+                    if corrected is not None:
+                        corrected_second = cells_to_second(corrected)
+                        if corrected_second not in second_to_frame:
+                            second_to_frame[corrected_second] = (frame_idx, corrected)
+
+        return second_to_frame, len(second_to_frame), empty_color, corner_history
+
+    # Try simple detection first (works for most videos)
+    simple_result = run_simple_detection(frames, tolerance, verbose)
+    simple_unique = simple_result[1]
 
     if verbose:
-        print(f"Refined corners: {refined_corners.astype(int).tolist()}")
-        print(f"Original valid: {original_valid}/10, Refined valid: {refined_valid}/10")
-        print(f"Using {'refined' if use_refinement else 'original'} corners")
+        print(f"Simple approach: {simple_unique}/60 unique seconds")
 
-    if use_refinement:
-        # Track corners across frames for camera motion compensation
-        corner_history = [refined_corners.copy()]
-        prev_corners = refined_corners
-
-        for i in range(1, len(frames)):
-            refined = refine_corners_with_edges(frames[i], prev_corners, margin=30)
-            corner_history.append(refined.copy())
-            prev_corners = refined
+    # If simple approach gets >= 54 seconds (90%), use it
+    if simple_unique >= 54:
+        second_to_frame, _, empty_color, corner_history = simple_result
+        if verbose:
+            print("Using simple approach (good results)")
+    else:
+        # Try Hough-based approach for difficult videos
+        hough_result = run_hough_detection(frames, quad_pts, tolerance, verbose)
+        hough_unique = hough_result[1]
 
         if verbose:
-            drift = np.linalg.norm(corner_history[-1] - corner_history[0], axis=1)
-            print(f"Corner drift over video: {drift.astype(int).tolist()} px")
-    else:
-        # Use original corners for all frames (no tracking needed)
-        corner_history = [quad_pts.copy() for _ in range(len(frames))]
+            print(f"Hough approach: {hough_unique}/60 unique seconds")
 
-    # Warp all frames using per-frame corners
+        if hough_unique > simple_unique:
+            second_to_frame, _, empty_color, corner_history = hough_result
+            if verbose:
+                print("Using Hough approach (better results)")
+        else:
+            second_to_frame, _, empty_color, corner_history = simple_result
+            if verbose:
+                print("Using simple approach (Hough not better)")
+
+    # Warp frames for verbose output and timestamp sync
     warped_frames = []
     for i, frame in enumerate(frames):
         warped = warp_to_rectangle(frame, corner_history[i])
         warped_frames.append(warped)
 
-    # Use empty color from validation (already optimized)
-    empty_color = best_empty_color
-
     if verbose:
         print(f"Detected empty color: RGB({empty_color[2]}, {empty_color[1]}, {empty_color[0]})")
-
-    # Second pass: detect visible cells using the global empty color
-    frame_observations = []
-    for i, warped in enumerate(warped_frames):
-        visible = get_visible_cells_warped(warped, empty_color, tolerance)
-        frame_observations.append(visible)
-
-        if verbose and i < 5:
+        for i in range(min(5, len(warped_frames))):
+            visible = get_visible_cells_warped(warped_frames[i], empty_color, tolerance)
             print(f"Frame {i}: {sorted(visible)}")
 
-    # Match each frame to its clock second using sum-based detection
-    # The sum of visible cell areas directly encodes the clock second (0-59)
-    from clock_inverse import cells_to_second, find_combination_index, validate_observation
-
-    # Build mapping: clock second -> (frame_idx, observation)
-    # Use validate_observation for error correction on invalid detections
-    second_to_frame = {}
+    # Build frame_to_second and second_0_frames for timestamp sync
     frame_to_second = []
-    corrected_count = 0
-    second_0_frames = []  # Track frames showing second 0 for timestamp sync
+    second_0_frames = []
+    corrected_count = 0  # Already counted in detection functions
 
-    for frame_idx, obs in enumerate(frame_observations):
-        clock_second = cells_to_second(obs)
+    for frame_idx, warped in enumerate(warped_frames):
+        visible = get_visible_cells_warped(warped, empty_color, tolerance)
+        clock_second = cells_to_second(visible)
         frame_to_second.append(clock_second)
-
-        # Track second 0 frames for timestamp calibration
         if clock_second == 0:
             second_0_frames.append(frame_idx)
-
-        if clock_second not in second_to_frame:
-            # Check if this is a valid combination
-            idx = find_combination_index(clock_second, obs)
-            if idx >= 0:
-                # Valid - use as is
-                second_to_frame[clock_second] = (frame_idx, obs)
-            else:
-                # Invalid - try error correction
-                _, is_valid, corrected = validate_observation(obs)
-                if corrected is not None:
-                    corrected_second = cells_to_second(corrected)
-                    if corrected_second not in second_to_frame:
-                        second_to_frame[corrected_second] = (frame_idx, corrected)
-                        corrected_count += 1
-                        if verbose:
-                            print(f"Frame {frame_idx}: corrected {sorted(obs)} -> {sorted(corrected)}")
-
-    if verbose and corrected_count > 0:
-        print(f"Applied {corrected_count} error corrections")
 
     # Calculate minute boundary offset using second 0 as sync point
     # Second 0 marks the exact minute boundary
