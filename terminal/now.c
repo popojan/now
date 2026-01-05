@@ -715,8 +715,8 @@ static void usage(const char *prog) {
     printf("Display:\n");
     printf("  -a          ASCII borders (.|'-)\n");
     printf("  -u          Unicode borders (box drawing) [default]\n");
-    printf("  -f PRESET   Preset: cjk [default], blocks, blocks1, distinct, kanji, emoji\n");
-    printf("     CHARS    Or 7 custom UTF-8 fill characters\n");
+    printf("  -p PRESET   Preset: cjk [default], blocks, blocks1, distinct, kanji, emoji\n");
+    printf("  -f CHARS    Custom 7 UTF-8 fill characters (one per cell type)\n");
     printf("  -1          Half-width: 1 column per cell (compact 8-col output)\n");
     printf("  -w          Wide fills: -f glyphs are full-width (CJK, 2 cols each)\n\n");
     printf("Time:\n");
@@ -725,8 +725,8 @@ static void usage(const char *prog) {
     printf("Examples:\n");
     printf("  %s                    # Live clock (CJK default)\n", prog);
     printf("  %s -l                 # In-place update\n", prog);
-    printf("  %s -f emoji -l        # Colored squares\n", prog);
-    printf("  %s -f blocks          # Classic monochrome\n", prog);
+    printf("  %s -p emoji -l        # Colored squares\n", prog);
+    printf("  %s -p blocks          # Classic monochrome\n", prog);
     printf("  %s -n 60 -s | %s -i   # Round-trip test\n", prog, prog);
 }
 
@@ -747,6 +747,7 @@ int main(int argc, char **argv) {
     time_t origin = 0;  /* Unix epoch default, same as webpage */
     int64_t fixed_t = -1;  /* -1 means use system time, else seconds from origin */
     int64_t num_frames = -1;  /* -1 means infinite (live mode) */
+    const char *preset = NULL;
     const char *fill_chars = NULL;
 
     for (int i = 1; i < argc; i++) {
@@ -757,6 +758,8 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-l") == 0) live_inplace = 1;
         else if (strcmp(argv[i], "-s") == 0) simulate = 1;
         else if (strcmp(argv[i], "-i") == 0) inverse = 1;
+        else if (strcmp(argv[i], "-p") == 0 && i+1 < argc)
+            preset = argv[++i];
         else if (strcmp(argv[i], "-f") == 0 && i+1 < argc)
             fill_chars = argv[++i];
         else if (strcmp(argv[i], "-o") == 0 && i+1 < argc)
@@ -772,14 +775,16 @@ int main(int argc, char **argv) {
 
     if (inverse) return run_inverse();
 
-    /* Expand fill presets (default: cjk) */
-    if (!fill_chars) fill_chars = "cjk";
-    for (int i = 0; PRESETS[i].name; i++) {
-        if (strcmp(fill_chars, PRESETS[i].name) == 0) {
-            fill_chars = PRESETS[i].chars;
-            if (PRESETS[i].wide) wide_fills = 1;
-            if (PRESETS[i].half) half_width = 1;
-            break;
+    /* Apply preset (default: cjk) - sets fill_chars, wide_fills, half_width */
+    if (!preset && !fill_chars) preset = "cjk";
+    if (preset) {
+        for (int i = 0; PRESETS[i].name; i++) {
+            if (strcmp(preset, PRESETS[i].name) == 0) {
+                fill_chars = PRESETS[i].chars;
+                if (PRESETS[i].wide) wide_fills = 1;
+                if (PRESETS[i].half) half_width = 1;
+                break;
+            }
         }
     }
 

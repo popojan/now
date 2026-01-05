@@ -37,8 +37,8 @@ Modes:
 Display:
   -a          ASCII borders (.|'-)
   -u          Unicode borders (box drawing) [default]
-  -f PRESET   Preset: cjk [default], blocks, blocks1, distinct, kanji, emoji
-     CHARS    Or 7 custom UTF-8 fill characters
+  -p PRESET   Preset: cjk [default], blocks, blocks1, distinct, kanji, emoji
+  -f CHARS    Custom 7 UTF-8 fill characters (one per cell type)
   -1          Half-width: 1 column per cell (compact 8-col output)
   -w          Wide fills: -f glyphs are full-width (CJK, 2 cols each)
 
@@ -61,22 +61,22 @@ In-place updates (no scroll):
 
 Emoji preset:
 ```bash
-./now -f emoji -l
+./now -p emoji -l
 ```
 
 Classic monochrome blocks:
 ```bash
-./now -f blocks
+./now -p blocks
 ```
 
 Distinct 4-color shading:
 ```bash
-./now -f distinct
+./now -p distinct
 ```
 
 Half-width compact mode:
 ```bash
-./now -f blocks1
+./now -p blocks1
 ```
 
 Custom UTF-8 fills:
