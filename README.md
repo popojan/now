@@ -38,8 +38,8 @@ make
 ### Round-trip Test
 
 ```bash
-./now -a -k 12345 -n 60 | ./now -i
-# Output: Minute (k): 12345
+./now -a -s -n 60 | ./now -i
+# Output: 1970-01-01T00:00:00Z
 ```
 
 ## Inverse Tool (Video)
