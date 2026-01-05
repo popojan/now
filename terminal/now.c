@@ -357,6 +357,9 @@ static int get_content_chars(const char *line) {
     return count;
 }
 
+/* Buffer for last non-frame line (used for timestamp parsing) */
+static char last_nonframe_line[256] = {0};
+
 /* Parse a single frame (12+ lines), return bitmask of visible cells, or -1 on EOF/error */
 static int parse_frame(FILE *f) {
     char line[256];
@@ -365,9 +368,15 @@ static int parse_frame(FILE *f) {
     int half_width_mode = 0;
     int wide_mode = 0;
 
-    /* Skip until we find a top border line */
+    /* Skip until we find a top border line (┌ or . followed by dashes) */
     while (fgets(line, sizeof(line), f)) {
-        if (line[0] == '.' || line[0] == '\xe2' || strchr(line, '-')) break;
+        unsigned char c0 = (unsigned char)line[0];
+        unsigned char c1 = (unsigned char)line[1];
+        unsigned char c2 = (unsigned char)line[2];
+        /* ASCII top-left corner '.' or Unicode ┌ (\xe2\x94\x8c) */
+        if (c0 == '.' || (c0 == 0xe2 && c1 == 0x94 && c2 == 0x8c)) break;
+        /* Save non-empty lines for potential timestamp parsing */
+        if (c0 >= '0' && c0 <= '9') strncpy(last_nonframe_line, line, 255);
         if (feof(f)) return -1;
     }
     if (feof(f)) return -1;
@@ -498,6 +507,10 @@ static int parse_frame(FILE *f) {
     if (cells_visible[5]) mask |= 0x10; /* 12 */
     if (cells_visible[6]) mask |= 0x20; /* 15 */
     if (cells_visible[7]) mask |= 0x40; /* 20 */
+
+    /* Validate: need exactly 10 content rows for complete frame */
+    if (num_content_lines != 10) return -1;
+
     return mask;
 }
 
@@ -636,37 +649,56 @@ static int reconstruct_k(uint8_t masks[60], uint64_t *out_k) {
 
 static int run_inverse(void) {
     uint8_t masks[60];
-    int count = 0;
+    int total = 0;  /* Total frames read */
+    last_nonframe_line[0] = '\0';  /* Reset buffer */
 
     fprintf(stderr, "Reading frames from stdin...\n");
 
-    while (count < 60) {
+    /* Read all frames, keeping last 60 in circular buffer */
+    while (1) {
         int mask = parse_frame(stdin);
         if (mask < 0) break;
-        masks[count] = (uint8_t)mask;
-        int sum = mask_to_sum(mask);
-        fprintf(stderr, "\rFrame %d: sum=%d  ", count + 1, sum);
-        count++;
+        masks[total % 60] = (uint8_t)mask;
+        int sum = mask_to_sum(mask) % 60;
+        fprintf(stderr, "\rFrame %d: sum=%d  ", total + 1, sum);
+        total++;
     }
     fprintf(stderr, "\n");
 
-    if (count < 60) {
-        fprintf(stderr, "Error: Need 60 frames, got %d\n", count);
+    if (total < 60) {
+        fprintf(stderr, "Error: Need 60 frames, got %d\n", total);
         return 1;
     }
 
+    /* Rotate buffer so masks[0] is the first of the last 60 frames */
+    if (total > 60) {
+        uint8_t temp[60];
+        int start = total % 60;
+        for (int i = 0; i < 60; i++)
+            temp[i] = masks[(start + i) % 60];
+        memcpy(masks, temp, 60);
+        fprintf(stderr, "Using last 60 of %d frames\n", total);
+    }
+
     /* Try to read timestamp line: ISO8601 format */
-    char line[256];
+    /* First check the buffer from parse_frame (in case timestamp was consumed) */
     time_t start_time = 0;
-    while (fgets(line, sizeof(line), stdin)) {
-        /* Look for ISO 8601 timestamp: YYYY-MM-DDTHH:MM:SSZ */
-        if (line[0] >= '0' && line[0] <= '9' && strlen(line) >= 20) {
-            start_time = parse_origin(line);
-            if (start_time > 0) break;
+    if (last_nonframe_line[0] >= '0' && last_nonframe_line[0] <= '9' &&
+        strlen(last_nonframe_line) >= 20) {
+        start_time = parse_origin(last_nonframe_line);
+    }
+    /* Then try reading more lines */
+    if (start_time == 0) {
+        char line[256];
+        while (fgets(line, sizeof(line), stdin)) {
+            if (line[0] >= '0' && line[0] <= '9' && strlen(line) >= 20) {
+                start_time = parse_origin(line);
+                if (start_time > 0) break;
+            }
         }
     }
     if (start_time == 0) {
-        /* No timestamp found, use current time (legacy behavior) */
+        fprintf(stderr, "Warning: No timestamp found, origin will be invalid\n");
         start_time = time(NULL);
     }
 
