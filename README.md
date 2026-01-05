@@ -1,10 +1,10 @@
 # Mondrian Clock
 
-A clock cycling through 60 states per minute, each a subset sum of **{1, 2, 4, 6, 12, 15, 20}**.
+A clock cycling through 60 states per minute, each a subset sum of {1, 2, 4, 6, 12, 15, 20}.
 
 These weights cover [Farey sequence](https://en.wikipedia.org/wiki/Farey_sequence) $F_6$ exactly.
 
-**Period:** $2^{30} \times 3^{16}$ **min ≈ 88 billion years**
+Period: $2^{30} \times 3^{16}$ min ≈ 88 billion years
 
 [![Mondrian Clock](web/screenshot.png)](https://hraj.si/now)
 
@@ -146,8 +146,4 @@ Total entropy: ~55 bits per minute, sufficient for the 46-quadrillion-minute per
 
 ## License
 
-CC BY-NC 4.0
-
-## Author
-
-
+[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) - Non-commercial use only
