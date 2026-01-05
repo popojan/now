@@ -12,6 +12,14 @@
 #define SLEEP_MS(ms) Sleep(ms)
 #define IS_TTY() _isatty(_fileno(stdout))
 static void enable_utf8(void) { SetConsoleOutputCP(65001); }
+static void enable_vt_mode(void) {
+    /* Enable ANSI escape sequences on Windows 10+ */
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (GetConsoleMode(hOut, &mode)) {
+        SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
+}
 static int get_milliseconds(void) {
     SYSTEMTIME st;
     GetSystemTime(&st);
@@ -23,6 +31,7 @@ static int get_milliseconds(void) {
 #define SLEEP_MS(ms) usleep((ms)*1000)
 #define IS_TTY() isatty(STDOUT_FILENO)
 static void enable_utf8(void) { /* UTF-8 default on Unix */ }
+static void enable_vt_mode(void) { /* ANSI supported natively on Unix */ }
 static int get_milliseconds(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -498,10 +507,12 @@ static int run_inverse(void) {
     /* First frame's second = (60 - rot) % 60 */
     int first_sec = (rot == 0) ? 0 : (60 - rot);
 
-    /* Compute origin: find when second 0 occurred, then subtract k minutes.
-     * If first_sec > 0, second 0 occurs (60-first_sec) seconds after start. */
+    /* Compute origin: timestamp is for the LAST (60th) frame.
+     * First frame time = last frame time - 59 seconds.
+     * Then find when second 0 occurred and subtract k minutes. */
+    time_t first_frame_time = start_time - 59;
     int seconds_to_second_0 = (60 - first_sec) % 60;
-    time_t second_0_time = start_time + seconds_to_second_0;
+    time_t second_0_time = first_frame_time + seconds_to_second_0;
     time_t origin_time = second_0_time - (time_t)(k * 60);
     struct tm *utc = gmtime(&origin_time);
 
@@ -564,6 +575,7 @@ int main(int argc, char **argv) {
 
     if (inverse) return run_inverse();
 
+    enable_vt_mode();  /* Enable ANSI escape sequences (Windows 10+) */
     if (unicode) { enable_utf8(); set_unicode(distinct); }
     else { set_ascii(distinct, fill_chars); }
 
@@ -614,9 +626,11 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* Output start timestamp for inverse mode (ISO 8601 UTC) */
-    printf("\n");  /* Newline after ^C */
-    struct tm *ts_utc = gmtime(&start_time);
+    /* Output termination timestamp for inverse mode (ISO 8601 UTC) */
+    /* Simulate: start_time + (frame - 1), Live: current time */
+    printf("\n");
+    time_t end_time = simulate ? start_time + (time_t)(frame - 1) : time(NULL);
+    struct tm *ts_utc = gmtime(&end_time);
     printf("%04d-%02d-%02dT%02d:%02d:%02dZ\n",
            ts_utc->tm_year + 1900, ts_utc->tm_mon + 1, ts_utc->tm_mday,
            ts_utc->tm_hour, ts_utc->tm_min, ts_utc->tm_sec);

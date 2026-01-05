@@ -646,25 +646,51 @@ def color_distance(c1, c2):
     return np.sqrt(np.sum((c1.astype(np.float32) - c2.astype(np.float32)) ** 2))
 
 
+def compute_fill_score(cell_color, empty_color):
+    """
+    Compute a fill score for a cell.
+
+    Combines distance from empty color with relative colorfulness.
+    Higher score = more likely to be filled.
+
+    Returns (score, distance, relative_colorfulness)
+    """
+    b, g, r = int(cell_color[0]), int(cell_color[1]), int(cell_color[2])
+    eb, eg, er = int(empty_color[0]), int(empty_color[1]), int(empty_color[2])
+
+    # Distance from empty color
+    dist = color_distance(cell_color, empty_color)
+
+    # Colorfulness of cell vs empty
+    cell_max_diff = max(abs(r - g), abs(g - b), abs(r - b))
+    empty_max_diff = max(abs(er - eg), abs(eg - eb), abs(er - eb))
+    rel_color = cell_max_diff - empty_max_diff
+
+    # Combined score: distance + bonus for extra colorfulness
+    # rel_color can be negative (less colorful than empty), use max(0, ...)
+    score = dist + max(0, rel_color * 0.5)
+
+    return score, dist, rel_color
+
+
 def is_cell_filled(cell_color, empty_color, tolerance=50):
     """
     Determine if a cell is filled (visible) or empty.
 
-    A cell is "filled" if its color differs significantly from the empty color.
-    Filled cells can be ANY color (yellow, blue, red, black, etc.) -
-    we just check that it's NOT the empty/background color.
+    Uses a combined metric of distance from empty color plus colorfulness bonus.
+    This handles both:
+    - iPhone videos where empty cells may have color tint from lighting
+    - Android videos where filled cells may have washed-out colors
 
     Args:
         cell_color: BGR color of the cell
         empty_color: BGR color of empty (unfilled) cells
-        tolerance: color distance threshold (Euclidean distance in BGR space)
+        tolerance: combined score threshold
     """
-    dist = color_distance(cell_color, empty_color)
+    score, _, _ = compute_fill_score(cell_color, empty_color)
 
-    # A cell is filled if it differs enough from the empty color
-    # Using Euclidean distance in BGR space
-    # Typical threshold: 50-80 works well for distinguishing colors
-    return dist > tolerance
+    # A cell is filled if its combined score exceeds the threshold
+    return score > tolerance
 
 
 def get_visible_cells_warped(warped_frame, empty_color, tolerance=80):
@@ -686,6 +712,74 @@ def get_visible_cells_warped(warped_frame, empty_color, tolerance=80):
             visible.add(cell_id)
 
     return visible
+
+
+def get_visible_cells_adaptive(warped_frame, empty_color, threshold):
+    """
+    Detect visible cells using the combined fill score metric.
+
+    Args:
+        warped_frame: perspective-corrected frame
+        empty_color: BGR color of empty cells
+        threshold: fill score threshold
+
+    Returns a set of cell IDs (1, 2, 4, 6, 12, 15, 20).
+    """
+    visible = set()
+
+    for cell_id in CELL_LAYOUT.keys():
+        cell_color = sample_cell_color_warped(warped_frame, cell_id)
+        score, _, _ = compute_fill_score(cell_color, empty_color)
+        if score > threshold:
+            visible.add(cell_id)
+
+    return visible
+
+
+def find_adaptive_threshold(warped_frames, empty_color):
+    """
+    Find the optimal threshold for separating filled from empty cells.
+
+    Uses the gap in the fill score distribution to find a natural threshold.
+
+    Args:
+        warped_frames: list of perspective-corrected frames
+        empty_color: BGR color of empty cells
+
+    Returns: optimal threshold value
+    """
+    # Collect fill scores from all cells in all frames
+    all_scores = []
+    for warped in warped_frames:
+        for cell_id in CELL_LAYOUT.keys():
+            cell_color = sample_cell_color_warped(warped, cell_id)
+            score, _, _ = compute_fill_score(cell_color, empty_color)
+            all_scores.append(score)
+
+    if not all_scores:
+        return 80  # Default fallback
+
+    # Sort scores to find the largest gap
+    all_scores = sorted(set(all_scores))  # Remove duplicates and sort
+
+    if len(all_scores) < 2:
+        return 80
+
+    # Find the largest gap in the distribution
+    max_gap = 0
+    threshold = 80
+
+    for i in range(len(all_scores) - 1):
+        gap = all_scores[i + 1] - all_scores[i]
+        if gap > max_gap:
+            max_gap = gap
+            # Set threshold at midpoint of the gap
+            threshold = (all_scores[i] + all_scores[i + 1]) / 2
+
+    # Sanity bounds: threshold should be between 20 and 200
+    threshold = max(20, min(200, threshold))
+
+    return threshold
 
 
 class VideoTooShortError(Exception):
@@ -952,10 +1046,15 @@ def analyze_video(video_path, tolerance=80, verbose=False):
         most_frequent = max(color_counts, key=color_counts.get)
         empty_color = np.array([v + 10 for v in most_frequent], dtype=np.uint8)
 
+        # Find adaptive threshold from score distribution
+        adaptive_tol = find_adaptive_threshold(warped_frames, empty_color)
+        if verbose:
+            print(f"Adaptive threshold: {adaptive_tol:.0f}")
+
         # Build second_to_frame with error correction
         second_to_frame = {}
         for frame_idx, warped in enumerate(warped_frames):
-            visible = get_visible_cells_warped(warped, empty_color, tolerance)
+            visible = get_visible_cells_warped(warped, empty_color, adaptive_tol)
             clock_second = cells_to_second(visible)
 
             if clock_second not in second_to_frame:
@@ -969,7 +1068,7 @@ def analyze_video(video_path, tolerance=80, verbose=False):
                         if corrected_second not in second_to_frame:
                             second_to_frame[corrected_second] = (frame_idx, corrected)
 
-        return second_to_frame, len(second_to_frame), empty_color, corner_history
+        return second_to_frame, len(second_to_frame), empty_color, corner_history, adaptive_tol
 
     def run_hough_detection(frames, quad_pts, tolerance, verbose=False):
         """
@@ -1000,10 +1099,13 @@ def analyze_video(video_path, tolerance=80, verbose=False):
         # Detect empty color
         empty_color = detect_empty_color(all_cell_colors)
 
+        # Find adaptive threshold from score distribution
+        adaptive_tol = find_adaptive_threshold(warped_frames, empty_color)
+
         # Build second_to_frame with error correction
         second_to_frame = {}
         for frame_idx, warped in enumerate(warped_frames):
-            visible = get_visible_cells_warped(warped, empty_color, tolerance)
+            visible = get_visible_cells_warped(warped, empty_color, adaptive_tol)
             clock_second = cells_to_second(visible)
 
             if clock_second not in second_to_frame:
@@ -1017,7 +1119,7 @@ def analyze_video(video_path, tolerance=80, verbose=False):
                         if corrected_second not in second_to_frame:
                             second_to_frame[corrected_second] = (frame_idx, corrected)
 
-        return second_to_frame, len(second_to_frame), empty_color, corner_history
+        return second_to_frame, len(second_to_frame), empty_color, corner_history, adaptive_tol
 
     # Try simple detection first (works for most videos)
     simple_result = run_simple_detection(frames, tolerance, verbose)
@@ -1026,13 +1128,14 @@ def analyze_video(video_path, tolerance=80, verbose=False):
     if verbose:
         print(f"Simple approach: {simple_unique}/60 unique seconds")
 
-    # If simple approach gets >= 54 seconds (90%), use it
-    if simple_unique >= 54:
-        second_to_frame, _, empty_color, corner_history = simple_result
+    # If simple approach gets all 60 seconds, use it
+    # Otherwise, always try Hough to see if it does better
+    if simple_unique >= 60:
+        second_to_frame, _, empty_color, corner_history, adaptive_tol = simple_result
         if verbose:
-            print("Using simple approach (good results)")
+            print("Using simple approach (perfect results)")
     else:
-        # Try Hough-based approach for difficult videos
+        # Try Hough-based approach - may help with camera motion or tilted videos
         hough_result = run_hough_detection(frames, quad_pts, tolerance, verbose)
         hough_unique = hough_result[1]
 
@@ -1040,11 +1143,11 @@ def analyze_video(video_path, tolerance=80, verbose=False):
             print(f"Hough approach: {hough_unique}/60 unique seconds")
 
         if hough_unique > simple_unique:
-            second_to_frame, _, empty_color, corner_history = hough_result
+            second_to_frame, _, empty_color, corner_history, adaptive_tol = hough_result
             if verbose:
                 print("Using Hough approach (better results)")
         else:
-            second_to_frame, _, empty_color, corner_history = simple_result
+            second_to_frame, _, empty_color, corner_history, adaptive_tol = simple_result
             if verbose:
                 print("Using simple approach (Hough not better)")
 
@@ -1066,7 +1169,7 @@ def analyze_video(video_path, tolerance=80, verbose=False):
     if verbose:
         print(f"Detected empty color: RGB({empty_color[2]}, {empty_color[1]}, {empty_color[0]})")
         for i in range(min(5, len(warped_frames))):
-            visible = get_visible_cells_warped(warped_frames[i], empty_color, tolerance)
+            visible = get_visible_cells_warped(warped_frames[i], empty_color, adaptive_tol)
             print(f"Frame {i}: {sorted(visible)}")
 
     # Build frame_to_second and second_0_frames for timestamp sync
@@ -1075,7 +1178,7 @@ def analyze_video(video_path, tolerance=80, verbose=False):
     corrected_count = 0  # Already counted in detection functions
 
     for frame_idx, warped in enumerate(warped_frames):
-        visible = get_visible_cells_warped(warped, empty_color, tolerance)
+        visible = get_visible_cells_warped(warped, empty_color, adaptive_tol)
         clock_second = cells_to_second(visible)
         frame_to_second.append(clock_second)
         if clock_second == 0:

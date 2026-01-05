@@ -139,26 +139,49 @@ def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_of
         def days_in_year(y):
             return 366 if is_leap_year(y) else 365
 
-        # Go back through years one at a time to handle varying year lengths
+        # Calculate target year directly using average year length
+        # (avoids iterating billions of times for ancient dates)
         abs_minutes = abs(origin_minutes)
-        origin_year = 0  # Start from year 0 (one before year 1)
+        minutes_per_year_avg = 365.2425 * minutes_per_day  # Gregorian average
+
+        # Estimate how many years back from year 1 (not year 0)
+        # Year 0 is 1 year before year 1, year -1 is 2 years before, etc.
+        years_back_estimate = int(abs_minutes / minutes_per_year_avg)
+
+        # Calculate exact minutes for the estimated years using 400-year cycles
+        full_400_cycles = years_back_estimate // 400
+        remaining_years = years_back_estimate % 400
+
+        # Minutes in full 400-year cycles (146097 days per 400 years)
+        minutes_in_cycles = full_400_cycles * 146097 * minutes_per_day
+
+        # Minutes in remaining years (year by year, but at most 399 iterations)
+        # Count from year 0 going backwards
+        minutes_in_remaining = 0
+        for y in range(remaining_years):
+            check_year = -(full_400_cycles * 400 + y)
+            minutes_in_remaining += days_in_year(check_year) * minutes_per_day
+
+        total_minutes_consumed = minutes_in_cycles + minutes_in_remaining
+
+        # Start at year 0 and adjust based on how many minutes we need
+        origin_year = 0
         remaining_minutes = abs_minutes
 
-        # Subtract year by year until remaining_minutes <= one year
-        while True:
-            year_minutes = days_in_year(origin_year) * minutes_per_day
-            if remaining_minutes <= year_minutes:
-                break
-            remaining_minutes -= year_minutes
+        # Subtract full 400-year cycles
+        for _ in range(full_400_cycles):
+            origin_year -= 400
+            remaining_minutes -= 146097 * minutes_per_day
+
+        # Subtract remaining years one at a time
+        # Use > not >= because if remaining equals exactly one year, we're at the start of that year
+        while remaining_minutes > days_in_year(origin_year) * minutes_per_day:
+            remaining_minutes -= days_in_year(origin_year) * minutes_per_day
             origin_year -= 1
 
-        # remaining_minutes is time from END of origin_year going backward
-        # If remaining == year length, we're at Jan 1 00:00 of origin_year
-        # Convert to time from START of origin_year
-        if remaining_minutes == year_minutes:
-            minutes_from_start = 0  # Exactly at start of year
-        else:
-            minutes_from_start = year_minutes - remaining_minutes
+        # remaining_minutes is time going BACKWARD from year 1
+        # Convert to time going FORWARD from start of origin_year
+        minutes_from_start = days_in_year(origin_year) * minutes_per_day - remaining_minutes
 
         # Calculate day/time within the year
         days_into_year = int(minutes_from_start // minutes_per_day)
@@ -202,8 +225,8 @@ def main():
     parser.add_argument(
         "--tolerance",
         type=int,
-        default=80,
-        help="Color distance tolerance for cell detection (default: 80)"
+        default=50,
+        help="Color distance tolerance for cell detection (default: 50)"
     )
     parser.add_argument(
         "--verbose", "-v",

@@ -28,9 +28,10 @@ gcc -Os -Wall -s -o now now.c
 
 Modes:
   (default)   Run clock, display frames (1/sec), scrolling output
+  -s          Simulate: fast output (no delay), timestamps advance with frames
   -l          Live: in-place update (no scroll, uses ANSI escape codes)
-  -i          Inverse: read 60 frames from stdin, output k
-  -n N        Output N frames fast (no delay), then exit
+  -i          Inverse: read 60 frames from stdin, reconstruct origin
+  -n N        Output N frames then exit
 
 Display:
   -a          ASCII mode (.|'#)
@@ -62,15 +63,16 @@ Generate 60 frames for minute 12345 in ASCII:
 
 Round-trip test (generate frames, decode back):
 ```bash
-./now -a -k 12345 -n 60 | ./now -i
+./now -s -n 60 | ./now -i
 ```
 
-Output:
+Round-trip with custom origin (12 hours of frames):
+```bash
+./now -o 2026-01-01T12:00:00Z -s -n 43260 | tail -n 782 | ./now -i
+# Output: 2026-01-01T12:00:00Z
 ```
-Minute (k): 12345
-Rotation: 0 (first frame was second 0)
-Origin: 1970-01-09T10:45:00+01:00
-```
+
+**Invariant**: Running with `-s` (simulate) produces the same origin reconstruction as running live and waiting for the frames to complete. The termination timestamp reflects the virtual time of the last frame.
 
 Distinct colors mode (4-color graph coloring):
 ```bash

@@ -64,6 +64,31 @@ pip install -r requirements.txt  # if needed
 python main.py <video_path> [--verbose] [--tolerance N]
 ```
 
+## Testing
+
+### Unit Tests
+
+```bash
+cd inverse
+source venv/bin/activate
+python -m unittest test_inverse -v
+```
+
+### Video Integration Tests
+
+Test all videos in `test_videos/` directory:
+
+```bash
+cd inverse
+source venv/bin/activate
+for video in ../test_videos/*.MOV; do
+  echo "=== $(basename "$video") ==="
+  python main.py "$video" 2>&1 | grep -A1 "Clock origin"
+done
+```
+
+See `test_videos/README.md` for expected origins and video characteristics.
+
 ## Key Implementation Details
 
 - The `ordering` object maps numbers 0-59 to arrays of cell combinations
