@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-"Now" is an animated clock with Mondrian-style design where no two minutes are ever the same. Each minute uses a unique combination of filled rectangles to express each second. The display uses seven colored cells (values 1, 2, 4, 6, 12, 15, 20) whose visibility cycles through different combinations.
+"Now" is an animated clock with Mondrian-style design where no two minutes repeat within the 88-billion-year period. Each minute uses a unique combination of filled rectangles to express each second. The display uses seven colored cells (values 1, 2, 4, 6, 12, 15, 20) whose visibility cycles through different combinations.
 
 The actual period of the clock is (2^30)(3^16) minutes (~46 quadrillion minutes), which is more than 6 times the estimated age of the Universe. Uses system time rather than International Atomic Time (TAI) to avoid network calls.
 

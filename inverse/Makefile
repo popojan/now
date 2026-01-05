@@ -1,6 +1,11 @@
 # Clock Inverse Analyzer
 
-.PHONY: test test-unit test-video clean exe
+.PHONY: test test-unit test-video clean exe venv
+
+# Create virtual environment
+venv:
+	python3 -m venv venv
+	./venv/bin/pip install -r requirements.txt
 
 # Run all tests
 test: test-unit test-video

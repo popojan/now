@@ -8,7 +8,7 @@ Period: $2^{30} \times 3^{16}$ min ≈ 88 billion years
 
 [![Mondrian Clock](web/screenshot.png)](https://hraj.si/now)
 
-**[▶ Live Demo](https://hraj.si/now)**
+**[▶ hraj.si/now](https://hraj.si/now)** · **[Wallpaper Engine](https://steamcommunity.com/sharedfiles/filedetails/?id=3125524524)**
 
 ## How It Works
 

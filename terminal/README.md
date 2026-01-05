@@ -1,6 +1,6 @@
 # Mondrian Terminal Clock
 
-A terminal-based Mondrian clock that displays the same patterns as the [web version](../web/index.html). Each minute has a unique visual representation, and no two minutes are ever the same.
+A terminal-based Mondrian clock that displays the same patterns as the [web version](../web/index.html). Each minute has a unique visual representation that doesn't repeat for 88 billion years.
 
 ## Features
 
@@ -27,10 +27,10 @@ gcc -Os -Wall -s -o now now.c
 ./now [options]
 
 Modes:
-  (default)   Run clock, display frames (1/sec), scrolling output
-  -s          Simulate: fast output (no delay), timestamps advance with frames
-  -l          Live: in-place update (no scroll, uses ANSI escape codes)
-  -i          Inverse: read 60 frames from stdin, reconstruct origin
+  (default)   Live clock, display frames (1/sec)
+  -s          Simulate: fast output (no delay), timestamp as-if-live
+  -l          In-place update (no scroll, requires TTY)
+  -i          Inverse: read frames from stdin, output k and origin
   -n N        Output N frames then exit
 
 Display:
