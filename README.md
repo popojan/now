@@ -1,56 +1,24 @@
 # Mondrian Clock
 
-A visual clock inspired by Piet Mondrian's geometric art. Each minute displays a unique pattern of colored rectangles, with the sequence not repeating for over 88 billion years.
+A clock cycling through 60 states per minute, each a subset sum of **{1, 2, 4, 6, 12, 15, 20}**.
 
-## Live Demo
+These weights cover [Farey sequence](https://en.wikipedia.org/wiki/Farey_sequence) $F_6$ exactly.
 
-Visit [hraj.si/now](https://hraj.si/now) to see the clock in action.
+**Period:** $2^{30} \times 3^{16}$ **min ≈ 88 billion years**
+
+[![Mondrian Clock](web/screenshot.png)](https://hraj.si/now)
+
+**[▶ Live Demo](https://hraj.si/now)**
 
 ## How It Works
 
-The clock face consists of 7 rectangular cells with areas 1, 2, 4, 6, 12, 15, and 20 units. Each second, a specific combination of cells is shown or hidden. The pattern for each minute is determined by a permutation function that encodes the minute number (k) into display choices.
-
-### The Period
-
-The clock's period is **(2^30) × (3^16) = 46,221,064,723,759,104 minutes**, which equals approximately **88 billion years**. Every minute within this period shows a unique sequence of 60 patterns.
-
-### Cell Layout
-
-```
-._________.____.
-|         |    |
-|         |    |
-|   20    | 12 |
-|         |    |
-|______.__|    |
-|      |__|____|
-|      |2 | 6  |
-|  15  |__|____|
-|      |  10   |
-|______|_______|
-```
-
-```
-    0  1  2  3  4  5
-0: 20 20 20 20 12 12
-1: 20 20 20 20 12 12
-2: 20 20 20 20 12 12
-3: 20 20 20 20 12 12
-4: 20 20 20 20 12 12
-5: 15 15 15  1 12 12
-6: 15 15 15  2  4  4
-7: 15 15 15  2  4  4
-8: 15 15 15  6  6  6
-9: 15 15 15  6  6  6
-```
+The clock face consists of 7 rectangular cells with areas 1, 2, 4, 6, 12, 15, and 20 units. Each second displays a unique combination of cells that sum to that second (0–59). The specific combination chosen each second depends on the minute number (k), creating a unique 60-pattern sequence for every minute in the period.
 
 ## Project Structure
 
 - `web/` - Clock webpage (HTML/CSS/JS)
 - `terminal/` - C terminal implementation
-- `inverse/` - Python video decoder
-
-**Note**: Test videos (`test_videos/`) are stored with Git LFS. Run `git lfs pull` after cloning.
+- `inverse/` - Python video analyzer (reconstructs clock origin from video recordings)
 
 ## Terminal Clock
 
