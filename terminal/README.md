@@ -4,9 +4,10 @@ A terminal-based Mondrian clock that displays the same patterns as the [web vers
 
 ## Features
 
-- ASCII and Unicode display modes
-- 4-color graph coloring for distinguishable cell fills
+- Beautiful CJK default (日月火水木金土 elements)
+- Multiple presets: cjk, blocks, distinct, kanji, emoji
 - Custom fill characters
+- ASCII and Unicode display modes
 - Inverse mode to decode frames back to minute number
 - Cross-platform (Linux, macOS, Windows)
 
@@ -34,49 +35,63 @@ Modes:
   -n N        Output N frames then exit
 
 Display:
-  -a          ASCII mode (.|'#)
-  -u          Unicode mode (box drawing + blocks) [default]
-  -d          Distinct fills (4-color graph coloring)
-  -f CHARS    Custom fill chars for cells 1,2,4,6,12,15,20 (7 chars)
+  -a          ASCII borders (.|'-)
+  -u          Unicode borders (box drawing) [default]
+  -f PRESET   Preset: cjk [default], blocks, blocks1, distinct, kanji, emoji
+     CHARS    Or 7 custom UTF-8 fill characters
+  -1          Half-width: 1 column per cell (compact 8-col output)
+  -w          Wide fills: -f glyphs are full-width (CJK, 2 cols each)
 
 Time:
   -o ORIGIN   Custom origin (ISO 8601, e.g. 2000-01-01T00:00:00Z)
-  -k K        Use minute K directly (ignores system time)
+  -t T        Use absolute time T seconds from origin
 ```
 
 ## Examples
 
-Live clock with Unicode (scrolling):
+Live clock (CJK default):
 ```bash
 ./now
 ```
 
-Live clock with in-place updates:
+In-place updates (no scroll):
 ```bash
 ./now -l
 ```
 
-Generate 60 frames for minute 12345 in ASCII:
+Emoji preset:
 ```bash
-./now -a -k 12345 -n 60
+./now -f emoji -l
 ```
 
-Round-trip test (generate frames, decode back):
+Classic monochrome blocks:
+```bash
+./now -f blocks
+```
+
+Distinct 4-color shading:
+```bash
+./now -f distinct
+```
+
+Half-width compact mode:
+```bash
+./now -f blocks1
+```
+
+Custom UTF-8 fills:
+```bash
+./now -f "░▒▓█○●◐"
+```
+
+Generate 60 frames starting at t=740700 (minute 12345):
+```bash
+./now -t 740700 -n 60 -s
+```
+
+Round-trip test:
 ```bash
 ./now -s -n 60 | ./now -i
-```
-
-Round-trip with custom origin (12 hours of frames):
-```bash
-./now -o 2026-01-01T12:00:00Z -s -n 43260 | tail -n 782 | ./now -i
-# Output: 2026-01-01T12:00:00Z
-```
-
-**Invariant**: Running with `-s` (simulate) produces the same origin reconstruction as running live and waiting for the frames to complete. The termination timestamp reflects the virtual time of the last frame.
-
-Distinct colors mode (4-color graph coloring):
-```bash
-./now -a -d
 ```
 
 ## How It Works

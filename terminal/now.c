@@ -117,6 +117,7 @@ static int perm_index(uint64_t k, int s) {
 /* Border and fill characters */
 static const char *B_TOP_L, *B_TOP_R, *B_BOT_L, *B_BOT_R, *B_HORIZ, *B_VERT;
 static const char *FILL[8]; /* indexed: 0=empty, 1,2,4,6,12,15,20 mapped */
+static int cell_width = 2;  /* columns per cell: 2 (default) or 1 (half-width) */
 
 /* Map cell value to index: 1->1, 2->2, 4->3, 6->4, 12->5, 15->6, 20->7 */
 static int cell_idx(int cell) {
@@ -134,62 +135,138 @@ static int cell_idx(int cell) {
  * 4-coloring required (3 is insufficient):
  *   A: 4, 15    B: 2, 20    C: 1    D: 6, 12
  */
-static char custom_fill[8][3];  /* For -f option */
+static char custom_fill[8][9];  /* For -f option: 2 UTF-8 chars (up to 4 bytes each) + null */
 
-static void set_ascii(int distinct, const char *fill_chars) {
+/* UTF-8 helper: get byte length of character starting at s */
+static int utf8_char_len(const char *s) {
+    unsigned char c = (unsigned char)*s;
+    if (c < 0x80) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+static void set_ascii(int distinct, const char *fill_chars, int half_width, int wide_fills) {
     B_TOP_L = "."; B_TOP_R = "."; B_BOT_L = "'"; B_BOT_R = "'";
     B_HORIZ = "-"; B_VERT = "|";
-    FILL[0] = "  ";
-    if (fill_chars && strlen(fill_chars) >= 7) {
-        /* Custom: 7 chars for cells 1,2,4,6,12,15,20 (in that order) */
+
+    /* Set cell width and empty fill */
+    if (half_width) {
+        cell_width = 1;
+        FILL[0] = " ";
+    } else {
+        cell_width = 2;
+        FILL[0] = "  ";
+    }
+
+    /* Double fills only when: 2-column cells AND not using wide glyphs */
+    int double_fills = (cell_width == 2) && !wide_fills;
+
+    if (fill_chars && *fill_chars) {
+        /* Custom: 7 UTF-8 glyphs for cells 1,2,4,6,12,15,20 */
+        const char *p = fill_chars;
         int has_space = 0;
-        for (int i = 0; i < 7; i++) {
-            if (fill_chars[i] == ' ') has_space = 1;
-            custom_fill[i+1][0] = fill_chars[i];
-            custom_fill[i+1][1] = fill_chars[i];
-            custom_fill[i+1][2] = '\0';
+        for (int i = 0; i < 7 && *p; i++) {
+            int len = utf8_char_len(p);
+            if (*p == ' ') has_space = 1;
+            if (double_fills) {
+                memcpy(custom_fill[i+1], p, len);
+                memcpy(custom_fill[i+1] + len, p, len);
+                custom_fill[i+1][len * 2] = '\0';
+            } else {
+                memcpy(custom_fill[i+1], p, len);
+                custom_fill[i+1][len] = '\0';
+            }
             FILL[i+1] = custom_fill[i+1];
+            p += len;
         }
         if (has_space) {
             fprintf(stderr, "Warning: -f contains space - inverse mode won't work\n");
         }
     } else if (distinct) {
-        /* 4-color graph coloring: A=##, B=@@, C=$$, D=%% */
-        FILL[1] = "$$"; /* 1 -> C */
-        FILL[2] = "@@"; /* 2 -> B */
-        FILL[3] = "##"; /* 4 -> A */
-        FILL[4] = "%%"; /* 6 -> D */
-        FILL[5] = "%%"; /* 12 -> D */
-        FILL[6] = "##"; /* 15 -> A */
-        FILL[7] = "@@"; /* 20 -> B */
+        /* 4-color graph coloring */
+        if (double_fills) {
+            FILL[1] = "$$"; FILL[2] = "@@"; FILL[3] = "##";
+            FILL[4] = "%%"; FILL[5] = "%%"; FILL[6] = "##"; FILL[7] = "@@";
+        } else {
+            FILL[1] = "$"; FILL[2] = "@"; FILL[3] = "#";
+            FILL[4] = "%"; FILL[5] = "%"; FILL[6] = "#"; FILL[7] = "@";
+        }
     } else {
-        for (int i = 1; i < 8; i++) FILL[i] = "##";
+        for (int i = 1; i < 8; i++) FILL[i] = double_fills ? "##" : "#";
     }
 }
 
-static void set_unicode(int distinct) {
+static void set_unicode(int distinct, const char *fill_chars, int half_width, int wide_fills) {
     B_TOP_L = "\xe2\x94\x8c"; B_TOP_R = "\xe2\x94\x90";
     B_BOT_L = "\xe2\x94\x94"; B_BOT_R = "\xe2\x94\x98";
     B_HORIZ = "\xe2\x94\x80"; B_VERT = "\xe2\x94\x82";
-    FILL[0] = "  ";
-    if (distinct) {
-        /* 4-color: A=██, B=▓▓, C=▒▒, D=░░ */
-        FILL[1] = "\xe2\x96\x92\xe2\x96\x92"; /* 1 -> C ▒▒ */
-        FILL[2] = "\xe2\x96\x93\xe2\x96\x93"; /* 2 -> B ▓▓ */
-        FILL[3] = "\xe2\x96\x88\xe2\x96\x88"; /* 4 -> A ██ */
-        FILL[4] = "\xe2\x96\x91\xe2\x96\x91"; /* 6 -> D ░░ */
-        FILL[5] = "\xe2\x96\x91\xe2\x96\x91"; /* 12 -> D ░░ */
-        FILL[6] = "\xe2\x96\x88\xe2\x96\x88"; /* 15 -> A ██ */
-        FILL[7] = "\xe2\x96\x93\xe2\x96\x93"; /* 20 -> B ▓▓ */
+
+    /* Set cell width and empty fill */
+    if (half_width) {
+        cell_width = 1;
+        FILL[0] = " ";
     } else {
-        for (int i = 1; i < 8; i++) FILL[i] = "\xe2\x96\x88\xe2\x96\x88";
+        cell_width = 2;
+        FILL[0] = "  ";
+    }
+
+    /* Double fills only when: 2-column cells AND not using wide glyphs */
+    int double_fills = (cell_width == 2) && !wide_fills;
+
+    if (fill_chars && *fill_chars) {
+        /* Custom: 7 UTF-8 glyphs for cells 1,2,4,6,12,15,20 */
+        const char *p = fill_chars;
+        int has_space = 0;
+        for (int i = 0; i < 7 && *p; i++) {
+            int len = utf8_char_len(p);
+            if (*p == ' ') has_space = 1;
+            if (double_fills) {
+                memcpy(custom_fill[i+1], p, len);
+                memcpy(custom_fill[i+1] + len, p, len);
+                custom_fill[i+1][len * 2] = '\0';
+            } else {
+                memcpy(custom_fill[i+1], p, len);
+                custom_fill[i+1][len] = '\0';
+            }
+            FILL[i+1] = custom_fill[i+1];
+            p += len;
+        }
+        if (has_space) {
+            fprintf(stderr, "Warning: -f contains space - inverse mode won't work\n");
+        }
+    } else if (distinct) {
+        /* 4-color graph coloring: A=██, B=▓▓, C=▒▒, D=░░ */
+        if (double_fills) {
+            FILL[1] = "\xe2\x96\x92\xe2\x96\x92"; /* ▒▒ */
+            FILL[2] = "\xe2\x96\x93\xe2\x96\x93"; /* ▓▓ */
+            FILL[3] = "\xe2\x96\x88\xe2\x96\x88"; /* ██ */
+            FILL[4] = "\xe2\x96\x91\xe2\x96\x91"; /* ░░ */
+            FILL[5] = "\xe2\x96\x91\xe2\x96\x91"; /* ░░ */
+            FILL[6] = "\xe2\x96\x88\xe2\x96\x88"; /* ██ */
+            FILL[7] = "\xe2\x96\x93\xe2\x96\x93"; /* ▓▓ */
+        } else {
+            FILL[1] = "\xe2\x96\x92"; /* ▒ */
+            FILL[2] = "\xe2\x96\x93"; /* ▓ */
+            FILL[3] = "\xe2\x96\x88"; /* █ */
+            FILL[4] = "\xe2\x96\x91"; /* ░ */
+            FILL[5] = "\xe2\x96\x91"; /* ░ */
+            FILL[6] = "\xe2\x96\x88"; /* █ */
+            FILL[7] = "\xe2\x96\x93"; /* ▓ */
+        }
+    } else {
+        for (int i = 1; i < 8; i++)
+            FILL[i] = double_fills ? "\xe2\x96\x88\xe2\x96\x88" : "\xe2\x96\x88";
     }
 }
 
 static void render(uint8_t mask) {
+    int border_width = cell_width * 6;  /* 6 cells × cell_width columns */
+
     /* Top border */
     printf("%s", B_TOP_L);
-    for (int i = 0; i < 12; i++) printf("%s", B_HORIZ);
+    for (int i = 0; i < border_width; i++) printf("%s", B_HORIZ);
     printf("%s\n", B_TOP_R);
 
     /* 10 content rows */
@@ -206,7 +283,7 @@ static void render(uint8_t mask) {
 
     /* Bottom border */
     printf("%s", B_BOT_L);
-    for (int i = 0; i < 12; i++) printf("%s", B_HORIZ);
+    for (int i = 0; i < border_width; i++) printf("%s", B_HORIZ);
     printf("%s\n\n", B_BOT_R);
     fflush(stdout);
 }
@@ -236,13 +313,48 @@ static time_t parse_origin(const char *s) {
 /* Check if position has a fill character (handles UTF-8) */
 static int is_fill_at(const char *s, int pos) {
     unsigned char c = (unsigned char)s[pos];
+    /* Empty and structural characters */
     if (c == ' ' || c == '|' || c == '-' || c == '.' || c == '\'' ||
         c == '\n' || c == '\r' || c == '\0') return 0;
-    /* UTF-8 box drawing (E2 94 xx) and blocks (E2 96 xx) */
-    if (c == 0xe2 && (unsigned char)s[pos+1] == 0x94) return 0; /* border */
-    if (c == 0xe2 && (unsigned char)s[pos+1] == 0x96) return 1; /* block fill */
-    /* ASCII fills: #, @, %, :, or any other printable */
+    /* UTF-8 box drawing (E2 94 xx) is border, not fill */
+    if (c == 0xe2 && (unsigned char)s[pos+1] == 0x94) return 0;
+    /* Any other UTF-8 multi-byte sequence is fill */
+    if (c >= 0x80) return 1;
+    /* ASCII fills: any printable except structural chars */
     return (c >= 0x21 && c <= 0x7e);
+}
+
+/* Count dashes in border line to detect half-width mode */
+static int count_border_dashes(const char *line) {
+    int count = 0;
+    for (const char *p = line; *p; p++) {
+        if (*p == '-') count++;
+        /* UTF-8 horizontal line ─ (E2 94 80) */
+        if ((unsigned char)*p == 0xe2 && (unsigned char)*(p+1) == 0x94 &&
+            (unsigned char)*(p+2) == 0x80) {
+            count++;
+            p += 2;
+        }
+    }
+    return count;
+}
+
+/* Count Unicode characters in content area (between borders, excluding borders) */
+static int get_content_chars(const char *line) {
+    const char *p = line;
+    /* Skip left border */
+    if ((unsigned char)*p == 0xe2) p += 3;
+    else if (*p == '|') p += 1;
+    int count = 0;
+    /* Count chars until right border */
+    while (*p && *p != '\n' && *p != '\r') {
+        if (*p == '|') break;
+        if ((unsigned char)*p == 0xe2 && (unsigned char)*(p+1) == 0x94 &&
+            (unsigned char)*(p+2) == 0x82) break;  /* │ */
+        p += utf8_char_len(p);
+        count++;
+    }
+    return count;
 }
 
 /* Parse a single frame (12+ lines), return bitmask of visible cells, or -1 on EOF/error */
@@ -250,6 +362,8 @@ static int parse_frame(FILE *f) {
     char line[256];
     int cells_visible[8] = {0}; /* indexed by cell_idx */
     int content_row = 0;
+    int half_width_mode = 0;
+    int wide_mode = 0;
 
     /* Skip until we find a top border line */
     while (fgets(line, sizeof(line), f)) {
@@ -258,54 +372,114 @@ static int parse_frame(FILE *f) {
     }
     if (feof(f)) return -1;
 
-    /* Read 10 content rows */
-    while (content_row < 10 && fgets(line, sizeof(line), f)) {
-        /* Skip empty lines */
-        if (line[0] == '\n' || line[0] == '\r') continue;
+    /* Detect half-width mode from border: 6 dashes = half, 12 = normal */
+    int dashes = count_border_dashes(line);
+    half_width_mode = (dashes <= 8);  /* Allow some tolerance */
 
-        /* Detect border lines by checking for corner chars */
+    /* Store content lines to allow pre-scan for mode detection */
+    char content_lines[10][256];
+    int num_content_lines = 0;
+
+    /* Read all content rows first */
+    while (num_content_lines < 10 && fgets(line, sizeof(line), f)) {
+        if (line[0] == '\n' || line[0] == '\r') continue;
         unsigned char c0 = (unsigned char)line[0];
         unsigned char c1 = (unsigned char)line[1];
         unsigned char c2 = (unsigned char)line[2];
-
-        /* ASCII corners: . or ' at start */
-        if (c0 == '.' || c0 == '\'') break;  /* Top/bottom border */
-
-        /* UTF-8 corners: E2 94 8C (┌) or E2 94 94 (└) or E2 94 9C (├) */
+        if (c0 == '.' || c0 == '\'') break;
         if (c0 == 0xe2 && c1 == 0x94 && (c2 == 0x8c || c2 == 0x94 || c2 == 0x9c)) break;
-
-        /* Skip horizontal divider lines (contain - but no fill chars) */
         if (strchr(line, '-') && !strchr(line, '#') && !strchr(line, '@') &&
             !strchr(line, '%') && !strchr(line, ':') &&
             !strstr(line, "\xe2\x96")) continue;
+        strncpy(content_lines[num_content_lines], line, 255);
+        content_lines[num_content_lines][255] = '\0';
+        num_content_lines++;
+    }
 
-        /* Parse content: check each of 6 grid columns */
+    /* Detect wide mode vs doubled mode using character count.
+     * In doubled mode, fills are printed twice (e.g., "██"), run lengths always even.
+     * In wide mode, fills are single wide chars, run lengths can be odd. */
+    if (!half_width_mode) {
+        int max_chars = 0;
+        for (int i = 0; i < num_content_lines; i++) {
+            int chars = get_content_chars(content_lines[i]);
+            if (chars > max_chars) max_chars = chars;
+        }
+        if (max_chars > 12) {
+            wide_mode = 0;  /* More than 12 chars = definitely doubled */
+        } else {
+            /* Check for odd-length runs of identical characters.
+             * In doubled mode: all runs are even (pairs).
+             * In wide mode: runs can be odd. */
+            int found_odd_run = 0;
+            for (int i = 0; i < num_content_lines && !found_odd_run; i++) {
+                const char *p = content_lines[i];
+                if ((unsigned char)*p == 0xe2) p += 3;
+                else if (*p == '|') p += 1;
+                while (*p && *p != '\n' && !found_odd_run) {
+                    unsigned char c = (unsigned char)*p;
+                    if (c == ' ' || c == '|') { p++; continue; }
+                    if (c == 0xe2 && (unsigned char)*(p+1) == 0x94) { p += 3; continue; }
+                    /* Count consecutive identical characters */
+                    int char_len = utf8_char_len(p);
+                    int run_len = 0;
+                    while (memcmp(p, p + run_len * char_len, char_len) == 0 &&
+                           *(p + run_len * char_len) != '\0')
+                        run_len++;
+                    if (run_len % 2 == 1) found_odd_run = 1;
+                    p += run_len * char_len;
+                }
+            }
+            wide_mode = found_odd_run;
+        }
+    }
+
+    /* Now parse the stored content rows */
+    for (content_row = 0; content_row < num_content_lines; content_row++) {
+        char *cline = content_lines[content_row];
         int pos = 0;
         /* Skip left border (ASCII | or UTF-8 │) */
-        if ((unsigned char)line[pos] == 0xe2) pos += 3;
-        else if (line[pos] == '|') pos += 1;
+        if ((unsigned char)cline[pos] == 0xe2) pos += 3;
+        else if (cline[pos] == '|') pos += 1;
 
-        for (int c = 0; c < 6 && line[pos]; c++) {
-            /* Check for fill in this 2-char-wide column */
-            int filled = is_fill_at(line, pos);
+        for (int c = 0; c < 6 && cline[pos]; c++) {
+            int filled = is_fill_at(cline, pos);
 
-            /* Advance by character width (2 ASCII chars or 2 UTF-8 chars) */
-            if ((unsigned char)line[pos] == 0xe2) pos += 6; /* 2 × 3-byte UTF-8 */
-            else pos += 2;
+            /* Advance based on mode and character type */
+            unsigned char ch = (unsigned char)cline[pos];
+            int advance;
+
+            if (half_width_mode) {
+                /* Half-width: 1 column per cell */
+                advance = (ch >= 0x80) ? utf8_char_len(cline + pos) : 1;
+            } else if (wide_mode) {
+                /* Wide: 1 fill char per cell, but 2 spaces for empty */
+                if (ch == ' ') advance = 2;
+                else advance = (ch >= 0x80) ? utf8_char_len(cline + pos) : 1;
+            } else {
+                /* Normal: 2 characters per cell (doubled fills) */
+                if (ch >= 0x80) {
+                    advance = utf8_char_len(cline + pos) * 2;
+                } else if (ch == ' ') {
+                    advance = 2;
+                } else {
+                    advance = 2;  /* Doubled ASCII */
+                }
+            }
+            pos += advance;
 
             /* Skip potential grid dividers */
-            while (line[pos] == '|' || ((unsigned char)line[pos] == 0xe2 &&
-                   (unsigned char)line[pos+1] == 0x94)) {
-                if ((unsigned char)line[pos] == 0xe2) pos += 3;
+            while (cline[pos] == '|' || ((unsigned char)cline[pos] == 0xe2 &&
+                   (unsigned char)cline[pos+1] == 0x94)) {
+                if ((unsigned char)cline[pos] == 0xe2) pos += 3;
                 else pos++;
             }
 
-            if (filled && content_row < 10) {
+            if (filled) {
                 int cell = GRID[content_row][c];
                 cells_visible[cell_idx(cell)] = 1;
             }
         }
-        content_row++;
     }
 
     /* Skip to empty line (frame separator) */
@@ -496,7 +670,7 @@ static int run_inverse(void) {
         start_time = time(NULL);
     }
 
-    fprintf(stderr, "Reconstructing minute number...\n");
+    fprintf(stderr, "Reconstructing...\n");
     uint64_t k;
     int rot = reconstruct_k(masks, &k);
     if (rot < 0) {
@@ -506,6 +680,12 @@ static int run_inverse(void) {
 
     /* First frame's second = (60 - rot) % 60 */
     int first_sec = (rot == 0) ? 0 : (60 - rot);
+
+    /* k is the minute where second 0 appears. If first_sec > 0, the first
+     * frame is actually in minute k-1 (spanning the minute boundary). */
+    uint64_t first_min = (first_sec > 0) ? k - 1 : k;
+    uint64_t t = first_min * 60 + (uint64_t)first_sec;
+    fprintf(stderr, "t = %llu\n", (unsigned long long)t);
 
     /* Compute origin: timestamp is for the LAST (60th) frame.
      * First frame time = last frame time - 59 seconds.
@@ -533,30 +713,47 @@ static void usage(const char *prog) {
     printf("  -i          Inverse: read frames from stdin, output k and origin\n");
     printf("  -n N        Output N frames then exit\n\n");
     printf("Display:\n");
-    printf("  -a          ASCII mode (.|'#)\n");
-    printf("  -u          Unicode mode (box drawing + blocks) [default]\n");
-    printf("  -d          Distinct fills (4-color graph coloring)\n");
-    printf("  -f CHARS    Custom fill chars for cells 1,2,4,6,12,15,20 (7 chars)\n\n");
+    printf("  -a          ASCII borders (.|'-)\n");
+    printf("  -u          Unicode borders (box drawing) [default]\n");
+    printf("  -f PRESET   Preset: cjk [default], blocks, blocks1, distinct, kanji, emoji\n");
+    printf("     CHARS    Or 7 custom UTF-8 fill characters\n");
+    printf("  -1          Half-width: 1 column per cell (compact 8-col output)\n");
+    printf("  -w          Wide fills: -f glyphs are full-width (CJK, 2 cols each)\n\n");
     printf("Time:\n");
     printf("  -o ORIGIN   Custom origin (ISO 8601, e.g. 2000-01-01T00:00:00Z)\n");
-    printf("  -k K        Use minute K directly (ignores system time)\n\n");
+    printf("  -t T        Use absolute time T seconds from origin\n\n");
     printf("Examples:\n");
-    printf("  %s                    # Live clock\n", prog);
-    printf("  %s -n 60 -s | %s -i   # Round-trip test (simulate 60 frames)\n", prog, prog);
-    printf("  %s -a -f 1246FPT      # ASCII with custom fills\n", prog);
+    printf("  %s                    # Live clock (CJK default)\n", prog);
+    printf("  %s -l                 # In-place update\n", prog);
+    printf("  %s -f emoji -l        # Colored squares\n", prog);
+    printf("  %s -f blocks          # Classic monochrome\n", prog);
+    printf("  %s -n 60 -s | %s -i   # Round-trip test\n", prog, prog);
 }
 
+/* Fill presets: name, chars, wide, half */
+static struct { const char *name; const char *chars; int wide; int half; } PRESETS[] = {
+    {"blocks",   "███████", 0, 0},       /* Default monochrome */
+    {"blocks1",  "███████", 0, 1},       /* Half-width monochrome */
+    {"distinct", "▒▓█░░█▓", 0, 0},       /* 4-color shading */
+    {"cjk",      "日月火水木金土", 1, 0}, /* Elements (wide) */
+    {"kanji",    "月火水木金土日", 1, 0}, /* Days of week (wide) */
+    {"emoji",    "🟥🟧🟨🟩🟦🟪⬛", 1, 0}, /* Colored squares (wide) */
+    {NULL, NULL, 0, 0}
+};
+
 int main(int argc, char **argv) {
-    int unicode = 1, distinct = 0, inverse = 0, live_inplace = 0, simulate = 0;
+    int unicode = 1, inverse = 0, live_inplace = 0, simulate = 0;
+    int half_width = 0, wide_fills = 0;
     time_t origin = 0;  /* Unix epoch default, same as webpage */
-    int64_t fixed_k = -1;  /* -1 means use system time */
+    int64_t fixed_t = -1;  /* -1 means use system time, else seconds from origin */
     int64_t num_frames = -1;  /* -1 means infinite (live mode) */
     const char *fill_chars = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-a") == 0) unicode = 0;
         else if (strcmp(argv[i], "-u") == 0) unicode = 1;
-        else if (strcmp(argv[i], "-d") == 0) distinct = 1;
+        else if (strcmp(argv[i], "-1") == 0) half_width = 1;
+        else if (strcmp(argv[i], "-w") == 0) wide_fills = 1;
         else if (strcmp(argv[i], "-l") == 0) live_inplace = 1;
         else if (strcmp(argv[i], "-s") == 0) simulate = 1;
         else if (strcmp(argv[i], "-i") == 0) inverse = 1;
@@ -564,8 +761,8 @@ int main(int argc, char **argv) {
             fill_chars = argv[++i];
         else if (strcmp(argv[i], "-o") == 0 && i+1 < argc)
             origin = parse_origin(argv[++i]);
-        else if (strcmp(argv[i], "-k") == 0 && i+1 < argc)
-            fixed_k = atoll(argv[++i]);
+        else if (strcmp(argv[i], "-t") == 0 && i+1 < argc)
+            fixed_t = atoll(argv[++i]);
         else if (strcmp(argv[i], "-n") == 0 && i+1 < argc)
             num_frames = atoll(argv[++i]);
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -575,9 +772,20 @@ int main(int argc, char **argv) {
 
     if (inverse) return run_inverse();
 
+    /* Expand fill presets (default: cjk) */
+    if (!fill_chars) fill_chars = "cjk";
+    for (int i = 0; PRESETS[i].name; i++) {
+        if (strcmp(fill_chars, PRESETS[i].name) == 0) {
+            fill_chars = PRESETS[i].chars;
+            if (PRESETS[i].wide) wide_fills = 1;
+            if (PRESETS[i].half) half_width = 1;
+            break;
+        }
+    }
+
     enable_vt_mode();  /* Enable ANSI escape sequences (Windows 10+) */
-    if (unicode) { enable_utf8(); set_unicode(distinct); }
-    else { set_ascii(distinct, fill_chars); }
+    if (unicode) { enable_utf8(); set_unicode(0, fill_chars, half_width, wide_fills); }
+    else { set_ascii(0, fill_chars, half_width, wide_fills); }
 
     signal(SIGINT, handle_signal);
 #ifndef _WIN32
@@ -585,7 +793,13 @@ int main(int argc, char **argv) {
 #endif
 
     time_t start_time = time(NULL);
-    int64_t start_elapsed = start_time - origin;
+    int64_t start_elapsed;
+    if (fixed_t >= 0) {
+        /* -k sets absolute seconds from origin */
+        start_elapsed = fixed_t;
+    } else {
+        start_elapsed = start_time - origin;
+    }
 
     uint64_t frame = 0;
     while (running && (num_frames < 0 || frame < (uint64_t)num_frames)) {
@@ -596,16 +810,15 @@ int main(int argc, char **argv) {
         if (simulate) {
             /* Simulation: advance virtual time by frame number */
             virtual_elapsed = start_elapsed + (int64_t)frame;
+        } else if (fixed_t >= 0) {
+            /* Live with -k: use fixed starting point + real elapsed */
+            virtual_elapsed = start_elapsed + (time(NULL) - start_time);
         } else {
             /* Live: use actual current time */
             virtual_elapsed = time(NULL) - origin;
         }
 
-        if (fixed_k >= 0) {
-            k = (uint64_t)fixed_k;
-        } else {
-            k = (uint64_t)(virtual_elapsed / 60);
-        }
+        k = (uint64_t)(virtual_elapsed / 60);
         sec = (int)(virtual_elapsed % 60);
 
         int idx = perm_index(k, sec);
@@ -627,9 +840,17 @@ int main(int argc, char **argv) {
     }
 
     /* Output termination timestamp for inverse mode (ISO 8601 UTC) */
-    /* Simulate: start_time + (frame - 1), Live: current time */
+    /* With -k: origin + virtual_elapsed, otherwise: real time */
     printf("\n");
-    time_t end_time = simulate ? start_time + (time_t)(frame - 1) : time(NULL);
+    time_t end_time;
+    if (fixed_t >= 0) {
+        /* Virtual time based on fixed start + elapsed frames */
+        end_time = origin + (time_t)(start_elapsed + (int64_t)(frame - 1));
+    } else if (simulate) {
+        end_time = start_time + (time_t)(frame - 1);
+    } else {
+        end_time = time(NULL);
+    }
     struct tm *ts_utc = gmtime(&end_time);
     printf("%04d-%02d-%02dT%02d:%02d:%02dZ\n",
            ts_utc->tm_year + 1900, ts_utc->tm_mon + 1, ts_utc->tm_mday,
