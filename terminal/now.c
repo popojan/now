@@ -20,23 +20,12 @@ static void enable_vt_mode(void) {
         SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     }
 }
-static int get_milliseconds(void) {
-    SYSTEMTIME st;
-    GetSystemTime(&st);
-    return st.wMilliseconds;
-}
 #else
 #include <unistd.h>
-#include <sys/time.h>
 #define SLEEP_MS(ms) usleep((ms)*1000)
 #define IS_TTY() isatty(STDOUT_FILENO)
 static void enable_utf8(void) { /* UTF-8 default on Unix */ }
 static void enable_vt_mode(void) { /* ANSI supported natively on Unix */ }
-static int get_milliseconds(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (int)(tv.tv_usec / 1000);
-}
 #endif
 
 static volatile int running = 1;
@@ -839,24 +828,38 @@ int main(int argc, char **argv) {
     }
 
     uint64_t frame = 0;
+    int64_t next_to_display = start_elapsed;  /* Next second we need to render */
     while (running && (num_frames < 0 || frame < (uint64_t)num_frames)) {
-        int64_t virtual_elapsed;
+        int64_t current_time;
+        int64_t display_time;
         uint64_t k;
         int sec;
 
         if (simulate) {
             /* Simulation: advance virtual time by frame number */
-            virtual_elapsed = start_elapsed + (int64_t)frame;
-        } else if (fixed_t >= 0) {
-            /* Live with -k: use fixed starting point + real elapsed */
-            virtual_elapsed = start_elapsed + (time(NULL) - start_time);
+            display_time = start_elapsed + (int64_t)frame;
         } else {
-            /* Live: use actual current time */
-            virtual_elapsed = time(NULL) - origin;
+            /* Live mode: get current time */
+            if (fixed_t >= 0) {
+                current_time = start_elapsed + (time(NULL) - start_time);
+            } else {
+                current_time = time(NULL) - origin;
+            }
+
+            /* If we're behind (CPU was busy), catch up by rendering next expected */
+            /* If we're caught up, wait for the second to change */
+            if (current_time >= next_to_display) {
+                display_time = next_to_display;
+                next_to_display++;
+            } else {
+                /* Current time hasn't reached next second yet, poll */
+                SLEEP_MS(50);
+                continue;
+            }
         }
 
-        k = (uint64_t)(virtual_elapsed / 60);
-        sec = (int)(virtual_elapsed % 60);
+        k = (uint64_t)(display_time / 60);
+        sec = (int)(display_time % 60);
 
         int idx = perm_index(k, sec);
         uint8_t mask = COMBOS[sec][idx];
@@ -868,11 +871,7 @@ int main(int argc, char **argv) {
 
         frame++;
         if (!simulate) {
-            /* Sleep until next second (efficient, no drift) */
-            time_t current = time(NULL);
-            do {
-                SLEEP_MS(1000 - get_milliseconds());
-            } while (time(NULL) == current && running);
+            SLEEP_MS(50);  /* Brief pause before checking if caught up */
         }
     }
 
