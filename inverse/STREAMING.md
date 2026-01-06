@@ -170,3 +170,32 @@ Typical case: Full determination requires 55-60 seconds.
 2. **History**: Save decoded origins with timestamps
 3. **Share**: Generate shareable result cards
 4. **Widget**: Show current k value as home screen widget
+
+## Signature Support (TODO for iOS)
+
+The C terminal utility (`src/now.c`) supports clock signatures via `-P` and `-N` flags:
+
+### Encoding Mode
+- `-P VALUE`: Clock signature/base (must be coprime with 60: no factors 2, 3, 5)
+- `-N SALT`: Value to encode (0 to P-1)
+
+Example: `-P 7 -N 3` encodes value 3 with base 7.
+
+### Decoding Mode
+From 2-minute recording, auto-detect P from k_combined deltas between minutes:
+```
+k_combined[minute+1] - k_combined[minute] = P
+N_era = k_combined % P
+```
+
+### iOS Integration Ideas
+1. **Personalized clocks**: Each user picks their signature P
+2. **Verification**: Decode P and N from screen recording to verify authenticity
+3. **QR alternative**: Clock pattern encodes data visually
+4. **Web app sync**: Add `?P=7&N=3` URL params to web version
+
+### Implementation Notes
+- Requires 2 complete minutes (120 frames) for auto-detection
+- With known P (user setting), only 60 frames needed
+- Era cycling ensures full 88B-year period preserved regardless of P
+- Coprime-60 constraint ensures N doesn't correlate with visual seconds
