@@ -19,12 +19,6 @@
 #include <time.h>
 
 #ifdef _WIN32
-#include <winsock2.h>
-#else
-#include <sys/select.h>
-#endif
-
-#ifdef _WIN32
 #include <windows.h>
 #define SLEEP_MS(ms) Sleep(ms)
 #define IS_TTY() _isatty(_fileno(stdout))
@@ -168,9 +162,6 @@ static int cell_idx(int cell) {
     return 0;
 }
 
-/* Store timestamp found while parsing (for when it's mixed with frames) */
-static char found_timestamp[64] = {0};
-
 /* Parse a single frame, auto-detecting display mode */
 static int parse_frame(FILE *f, uint8_t *mask_out) {
     char line[256];
@@ -181,10 +172,6 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
     /* Skip until we find a top border line (top-left corner) */
     while (fgets(line, sizeof(line), f)) {
         if (is_top_left_corner(line)) break;
-        /* Check if this looks like a timestamp (YYYY-MM-DD) */
-        if (line[0] >= '1' && line[0] <= '2' && line[4] == '-') {
-            strncpy(found_timestamp, line, sizeof(found_timestamp) - 1);
-        }
         if (feof(f)) return -1;
     }
     if (feof(f)) return -1;
@@ -335,16 +322,16 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
 
 /*
  * Inverse modes:
- *   1. No -N, no -o: Assume era=0, N_0 = decoded N_era (simple origin recovery)
- *   2. -o ORIGIN:    Verify era=0 against approximate origin, decode N_0
- *   3. -N given:     Use explicit N_0, calculate era from decoded N_era
+ *   1. No -N: Assume era=0, N_0 = decoded N_era (simple origin recovery)
+ *   2. -N given: Use explicit N_0, calculate era from decoded N_era
+ *
+ * Origin is computed from current time: origin = now - elapsed_t
  */
-static int run_inverse(clock_params_t *params, int n_specified, time_t approx_origin) {
+static int run_inverse(clock_params_t *params, int n_specified) {
     uint8_t masks[600];  /* Up to 10 minutes */
     int total = 0;
     int align_start = -1;  /* First frame at second 0 */
     int need_aligned = (params->sig_period == 0) ? 120 : 60;  /* 2 min for auto, 1 for known P */
-    time_t end_timestamp = 0;
 
     fprintf(stderr, "Reading frames from stdin...\n");
     while (total < 600) {
@@ -373,10 +360,6 @@ static int run_inverse(clock_params_t *params, int n_specified, time_t approx_or
 
     /* Close stdin to signal encoder to stop (triggers SIGPIPE) */
     fclose(stdin);
-
-    /* Origin is computed from current time, not embedded timestamp.
-     * The clock pattern encodes elapsed time; we know "now" from the system. */
-    int total_for_origin = total;
 
     if (total < 60) {
         fprintf(stderr, "Error: Need at least 60 frames, got %d\n", total);
@@ -537,27 +520,8 @@ output:;
             era = (sig_Nera >= sig_N0) ? (sig_Nera - sig_N0) : (sig_P - sig_N0 + sig_Nera);
             uint64_t max_minute_per_era = PERIOD_ORIGINAL_MINUTES / sig_P;
             elapsed_t = (era * max_minute_per_era + local_minute) * 60 - global_align_offset;
-        } else if (approx_origin > 0 && end_timestamp > 0) {
-            /* Mode 2: Verify era=0 against approximate origin */
-            sig_N0 = sig_Nera;  /* Assume era=0 */
-            /* Aligned frame is at local_minute * 60, first frame is align_offset earlier */
-            elapsed_t = local_minute * 60 - global_align_offset;
-
-            /* Verify: does computed origin match approximate origin? */
-            time_t computed_origin = end_timestamp - (time_t)elapsed_t - (total_for_origin - 1);
-            int64_t diff = (int64_t)(computed_origin - approx_origin);
-            if (diff < 0) diff = -diff;
-
-            uint64_t max_minute_per_era = PERIOD_ORIGINAL_MINUTES / sig_P;
-            int64_t era_seconds = (int64_t)max_minute_per_era * 60;
-
-            if (diff < era_seconds / 2) {
-                fprintf(stderr, "Verified: origin matches (era=0, diff=%lld sec)\n", (long long)diff);
-            } else {
-                fprintf(stderr, "Warning: origin differs by %lld sec (era may be non-zero)\n", (long long)diff);
-            }
         } else {
-            /* Mode 1: Assume era=0, N_0 = N_era */
+            /* Mode 1/2: Assume era=0, N_0 = N_era */
             sig_N0 = sig_Nera;
             elapsed_t = local_minute * 60 - global_align_offset;
         }
@@ -566,9 +530,8 @@ output:;
         printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
         printf("first_second: %d\n", first_sec);
 
-        /* Compute origin: use end_timestamp if available, else current time */
-        time_t ref_time = (end_timestamp > 0) ? end_timestamp : time(NULL);
-        time_t origin = ref_time - (time_t)elapsed_t;
+        /* Compute origin from current time (clock pattern encodes elapsed time) */
+        time_t origin = time(NULL) - (time_t)elapsed_t;
         struct tm *utc = gmtime(&origin);
         if (utc) {
             printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
@@ -593,9 +556,8 @@ output_no_sig:;
         printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
         printf("first_second: %d\n", first_sec);
 
-        /* Compute origin: use end_timestamp if available, else current time */
-        time_t ref_time = (end_timestamp > 0) ? end_timestamp : time(NULL);
-        time_t origin = ref_time - (time_t)elapsed_t;
+        /* Compute origin from current time (clock pattern encodes elapsed time) */
+        time_t origin = time(NULL) - (time_t)elapsed_t;
         struct tm *utc = gmtime(&origin);
         if (utc) {
             printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
@@ -670,12 +632,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* In inverse mode, default to -o now if no -P, -N, or -o given */
     if (inverse) {
-        if (origin == 0 && params.sig_period == 0 && !n_specified) {
-            origin = (time(NULL) / 60) * 60;  /* Floor to minute */
-        }
-        return run_inverse(&params, n_specified, origin);
+        return run_inverse(&params, n_specified);
     }
 
     /* Show era info when using signatures */
@@ -746,14 +704,6 @@ int main(int argc, char **argv) {
 
         if (!simulate) SLEEP_MS(50);
     }
-
-    /* Output timestamp for inverse */
-    time_t end_time = (start_t >= 0) ? origin + elapsed + frame - 1
-                                     : (simulate ? now_time + frame - 1 : time(NULL));
-    struct tm *utc = gmtime(&end_time);
-    printf("%04d-%02d-%02dT%02d:%02d:%02dZ\n",
-           utc->tm_year + 1900, utc->tm_mon + 1, utc->tm_mday,
-           utc->tm_hour, utc->tm_min, utc->tm_sec);
 
     return 0;
 }
