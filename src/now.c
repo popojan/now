@@ -2,7 +2,12 @@
  * now.c - Unified CLI for "now" Mondrian clock
  *
  * Default behavior: original now clock (88 billion year period)
- * Extended: custom periods, signatures, Kolmogorov variants
+ * Extended: custom signature encoding (period must be coprime with 60)
+ *
+ * Time model:
+ *   t = elapsed seconds since origin
+ *   s = t mod 60 (visual second, shown by cell sum)
+ *   k = t / 60 (logical minute, determines variant selection)
  *
  * Compile: gcc -O2 -o now now.c core.c render.c
  */
@@ -58,7 +63,7 @@ static time_t parse_time(const char *s) {
 }
 
 static void usage(const char *prog) {
-    printf("now - Mondrian clock with signatures\n\n");
+    printf("now - Mondrian clock with signature encoding\n\n");
     printf("Usage: %s [options]\n\n", prog);
     printf("Modes:\n");
     printf("  (default)   Live clock\n");
@@ -75,28 +80,37 @@ static void usage(const char *prog) {
     printf("Time:\n");
     printf("  -o ORIGIN   Origin timestamp (ISO 8601)\n");
     printf("  -t T        Start at specific second from origin\n\n");
-    printf("Extended (infinite):\n");
-    printf("  -P PERIOD   Custom period in minutes (default: original 88B-year)\n");
-    printf("  -V VARIANTS Kolmogorov variants (extends period by factor)\n");
-    printf("  -v VARIANT  Use specific variant (0 to V-1)\n\n");
+    printf("Signatures:\n");
+    printf("  -P PERIOD   Signature period in seconds (must be coprime with 60)\n");
+    printf("              Valid periods have no factors 2, 3, or 5\n");
+    printf("              Examples: 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 49...\n");
+    printf("  -N VALUE    Encode VALUE (0 to PERIOD-1) in signature\n");
+    printf("              Changes variant selection to encode custom data\n\n");
     printf("Examples:\n");
-    printf("  %s                    # Live clock (original)\n", prog);
-    printf("  %s -l -p emoji        # In-place with emoji\n", prog);
-    printf("  %s -n 60 -s | %s -i   # Round-trip test\n", prog, prog);
-    printf("  %s -P 60 -n 60 -s | %s -P 60 -i  # Custom period with signatures\n", prog, prog);
+    printf("  %s                        # Live clock (original 88B-year period)\n", prog);
+    printf("  %s -l -p emoji            # In-place with emoji\n", prog);
+    printf("  %s -n 60 -s | %s -i       # Round-trip test\n", prog, prog);
+    printf("  %s -P 7 -N 3 -n 60 -s     # Encode value 3 with period 7\n", prog);
+    printf("  %s -P 7 -n 60 -s | %s -P 7 -i  # Round-trip with signature\n", prog, prog);
 }
 
 /* ============ Inverse Mode ============ */
 
+/* Check if position has a fill character (handles UTF-8) */
 static int is_fill_at(const char *s, int pos) {
     unsigned char c = (unsigned char)s[pos];
+    /* Empty and structural characters */
     if (c == ' ' || c == '|' || c == '-' || c == '.' || c == '\'' ||
         c == '\n' || c == '\r' || c == '\0') return 0;
+    /* UTF-8 box drawing (E2 94 xx) is border, not fill */
     if (c == 0xe2 && (unsigned char)s[pos+1] == 0x94) return 0;
+    /* Any other UTF-8 multi-byte sequence is fill */
     if (c >= 0x80) return 1;
+    /* ASCII fills: any printable except structural chars */
     return (c >= 0x21 && c <= 0x7e);
 }
 
+/* UTF-8 helper: get byte length of character */
 static int utf8_len(const char *s) {
     unsigned char c = (unsigned char)*s;
     if (c < 0x80) return 1;
@@ -106,51 +120,154 @@ static int utf8_len(const char *s) {
     return 1;
 }
 
+/* Count dashes in border line to detect half-width mode */
+static int count_border_dashes(const char *line) {
+    int count = 0;
+    for (const char *p = line; *p; p++) {
+        if (*p == '-') count++;
+        /* UTF-8 horizontal line ─ (E2 94 80) */
+        if ((unsigned char)*p == 0xe2 && (unsigned char)*(p+1) == 0x94 &&
+            (unsigned char)*(p+2) == 0x80) {
+            count++;
+            p += 2;
+        }
+    }
+    return count;
+}
+
+/* Count Unicode characters in content area (between borders) */
+static int get_content_chars(const char *line) {
+    const char *p = line;
+    /* Skip left border */
+    if ((unsigned char)*p == 0xe2) p += 3;
+    else if (*p == '|') p += 1;
+    int count = 0;
+    /* Count chars until right border */
+    while (*p && *p != '\n' && *p != '\r') {
+        if (*p == '|') break;
+        if ((unsigned char)*p == 0xe2 && (unsigned char)*(p+1) == 0x94 &&
+            (unsigned char)*(p+2) == 0x82) break;  /* │ */
+        p += utf8_len(p);
+        count++;
+    }
+    return count;
+}
+
+/* Map cell value to index: 1->1, 2->2, 4->3, 6->4, 12->5, 15->6, 20->7 */
+static int cell_idx(int cell) {
+    switch(cell) {
+        case 1: return 1; case 2: return 2; case 4: return 3;
+        case 6: return 4; case 12: return 5; case 15: return 6; case 20: return 7;
+    }
+    return 0;
+}
+
+/* Parse a single frame, auto-detecting display mode */
 static int parse_frame(FILE *f, uint8_t *mask_out) {
     char line[256];
     int cells_visible[8] = {0};
-    int content_row = 0;
+    int half_width_mode = 0;
+    int wide_mode = 0;
 
-    /* Find top border */
+    /* Skip until we find a top border line */
     while (fgets(line, sizeof(line), f)) {
-        unsigned char c = (unsigned char)line[0];
-        if (c == '.' || (c == 0xe2 && (unsigned char)line[1] == 0x94 && (unsigned char)line[2] == 0x8c))
-            break;
+        if (line[0] == '.' || line[0] == '\xe2' || strchr(line, '-')) break;
         if (feof(f)) return -1;
     }
     if (feof(f)) return -1;
 
-    /* Read content rows */
-    while (content_row < 10 && fgets(line, sizeof(line), f)) {
+    /* Detect half-width mode from border: 6 dashes = half, 12 = normal */
+    int dashes = count_border_dashes(line);
+    half_width_mode = (dashes <= 8);
+
+    /* Store content lines for mode detection and parsing */
+    char content_lines[10][256];
+    int num_content_lines = 0;
+
+    while (num_content_lines < 10 && fgets(line, sizeof(line), f)) {
         if (line[0] == '\n' || line[0] == '\r') continue;
         unsigned char c0 = (unsigned char)line[0];
+        unsigned char c1 = (unsigned char)line[1];
+        unsigned char c2 = (unsigned char)line[2];
         if (c0 == '.' || c0 == '\'') break;
-        if (c0 == 0xe2 && (unsigned char)line[1] == 0x94 &&
-            ((unsigned char)line[2] == 0x94 || (unsigned char)line[2] == 0x98)) break;
+        if (c0 == 0xe2 && c1 == 0x94 && (c2 == 0x8c || c2 == 0x94 || c2 == 0x98)) break;
+        if (strchr(line, '-') && !strchr(line, '#') && !strchr(line, '@') &&
+            !strchr(line, '%') && !strstr(line, "\xe2\x96")) continue;
+        strncpy(content_lines[num_content_lines], line, 255);
+        content_lines[num_content_lines][255] = '\0';
+        num_content_lines++;
+    }
 
-        int pos = (c0 == 0xe2) ? 3 : ((c0 == '|') ? 1 : 0);
+    /* Detect wide mode vs doubled mode using character count.
+     * In doubled mode, fills are printed twice, run lengths always even.
+     * In wide mode, fills are single wide chars, run lengths can be odd. */
+    if (!half_width_mode) {
+        int max_chars = 0;
+        for (int i = 0; i < num_content_lines; i++) {
+            int chars = get_content_chars(content_lines[i]);
+            if (chars > max_chars) max_chars = chars;
+        }
+        if (max_chars > 12) {
+            wide_mode = 0;  /* More than 12 chars = definitely doubled */
+        } else {
+            /* Check for odd-length runs of identical characters */
+            int found_odd_run = 0;
+            for (int i = 0; i < num_content_lines && !found_odd_run; i++) {
+                const char *p = content_lines[i];
+                if ((unsigned char)*p == 0xe2) p += 3;
+                else if (*p == '|') p += 1;
+                while (*p && *p != '\n' && !found_odd_run) {
+                    unsigned char c = (unsigned char)*p;
+                    if (c == ' ' || c == '|') { p++; continue; }
+                    if (c == 0xe2 && (unsigned char)*(p+1) == 0x94) { p += 3; continue; }
+                    int char_len = utf8_len(p);
+                    int run_len = 0;
+                    while (memcmp(p, p + run_len * char_len, char_len) == 0 &&
+                           *(p + run_len * char_len) != '\0')
+                        run_len++;
+                    if (run_len % 2 == 1) found_odd_run = 1;
+                    p += run_len * char_len;
+                }
+            }
+            wide_mode = found_odd_run;
+        }
+    }
 
-        for (int c = 0; c < 6 && line[pos]; c++) {
-            int filled = is_fill_at(line, pos);
-            unsigned char ch = (unsigned char)line[pos];
-            int advance = (ch >= 0x80) ? utf8_len(line + pos) * 2 : 2;
-            if (ch == ' ') advance = 2;
+    /* Parse content rows with detected mode */
+    for (int row = 0; row < num_content_lines; row++) {
+        char *cline = content_lines[row];
+        int pos = 0;
+        /* Skip left border */
+        if ((unsigned char)cline[pos] == 0xe2) pos += 3;
+        else if (cline[pos] == '|') pos += 1;
+
+        for (int c = 0; c < 6 && cline[pos]; c++) {
+            int filled = is_fill_at(cline, pos);
+            unsigned char ch = (unsigned char)cline[pos];
+            int advance;
+
+            if (half_width_mode) {
+                /* Half-width: 1 column per cell */
+                advance = (ch >= 0x80) ? utf8_len(cline + pos) : 1;
+            } else if (wide_mode) {
+                /* Wide: 1 fill char per cell, but 2 spaces for empty */
+                if (ch == ' ') advance = 2;
+                else advance = (ch >= 0x80) ? utf8_len(cline + pos) : 1;
+            } else {
+                /* Normal: 2 characters per cell (doubled fills) */
+                if (ch >= 0x80) {
+                    advance = utf8_len(cline + pos) * 2;
+                } else {
+                    advance = 2;
+                }
+            }
             pos += advance;
 
             if (filled) {
-                int cell = GRID[content_row][c];
-                switch(cell) {
-                    case 1: cells_visible[1] = 1; break;
-                    case 2: cells_visible[2] = 1; break;
-                    case 4: cells_visible[3] = 1; break;
-                    case 6: cells_visible[4] = 1; break;
-                    case 12: cells_visible[5] = 1; break;
-                    case 15: cells_visible[6] = 1; break;
-                    case 20: cells_visible[7] = 1; break;
-                }
+                int cell = GRID[row][c];
+                cells_visible[cell_idx(cell)] = 1;
             }
         }
-        content_row++;
     }
 
     /* Skip to empty line */
@@ -158,7 +275,7 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
         if (line[0] == '\n' || strlen(line) <= 1) break;
     }
 
-    if (content_row < 10) return -1;
+    if (num_content_lines < 10) return -1;
 
     *mask_out = (cells_visible[1] ? 0x01 : 0) |
                 (cells_visible[2] ? 0x02 : 0) |
@@ -190,32 +307,39 @@ static int run_inverse(clock_params_t *params) {
         return 1;
     }
 
-    uint64_t k;
-    int rot = inverse_minute(masks, params, &k);
+    uint64_t elapsed_t, sig_value;
+    int rot = inverse_time(masks, params, &elapsed_t, &sig_value);
     if (rot < 0) {
         fprintf(stderr, "Error: Could not reconstruct\n");
         return 1;
     }
 
     int first_sec = (rot == 0) ? 0 : (60 - rot);
-    /* k is minute where second 0 appears; if first_sec > 0, first frame is from k-1 */
-    uint64_t first_minute = (first_sec > 0 && k > 0) ? k - 1 : k;
-    uint64_t elapsed = first_minute * 60 + first_sec;
 
-    printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed);
-    printf("minute: %llu\n", (unsigned long long)k);
+    printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
+    printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
     printf("first_second: %d\n", first_sec);
 
-    /* Show signatures if using custom period */
-    if (params->period != PERIOD_ORIGINAL) {
-        uint64_t divisors[64];
-        int num_div = get_divisors(params->period, divisors, 64);
-        printf("\nsignatures:\n");
-        for (int i = 0; i < num_div; i++) {
-            uint64_t sig = get_signature(k, divisors[i]);
-            printf("  sig[%llu]: %llu\n",
-                   (unsigned long long)divisors[i],
-                   (unsigned long long)sig);
+    /* Show signature if period specified */
+    if (params->sig_period > 0) {
+        if (!is_coprime_60(params->sig_period)) {
+            fprintf(stderr, "Warning: Period %llu is not coprime with 60\n",
+                    (unsigned long long)params->sig_period);
+        }
+        printf("\nsignature:\n");
+        printf("  period: %llu\n", (unsigned long long)params->sig_period);
+        printf("  value: %llu\n", (unsigned long long)sig_value);
+    }
+
+    /* Auto-detect signature period if not specified */
+    if (params->sig_period == 0) {
+        uint64_t detected = detect_signature_period(masks, 60);
+        if (detected > 0) {
+            printf("\nauto-detected signature period: %llu\n",
+                   (unsigned long long)detected);
+            printf("  sig[%llu] = %llu\n",
+                   (unsigned long long)detected,
+                   (unsigned long long)(elapsed_t % detected));
         }
     }
 
@@ -254,12 +378,25 @@ int main(int argc, char **argv) {
             start_t = atoll(argv[++i]);
         else if (strcmp(argv[i], "-n") == 0 && i+1 < argc)
             num_frames = atoll(argv[++i]);
-        else if (strcmp(argv[i], "-P") == 0 && i+1 < argc)
-            params.period = strtoull(argv[++i], NULL, 10);
-        else if (strcmp(argv[i], "-V") == 0 && i+1 < argc)
-            params.num_variants = strtoull(argv[++i], NULL, 10);
-        else if (strcmp(argv[i], "-v") == 0 && i+1 < argc)
-            params.variant = strtoull(argv[++i], NULL, 10);
+        else if (strcmp(argv[i], "-P") == 0 && i+1 < argc) {
+            params.sig_period = strtoull(argv[++i], NULL, 10);
+            if (!is_coprime_60(params.sig_period)) {
+                fprintf(stderr, "Warning: Period %llu is not coprime with 60\n",
+                        (unsigned long long)params.sig_period);
+                fprintf(stderr, "         Signatures may not be independent of second\n");
+            }
+        }
+        else if (strcmp(argv[i], "-N") == 0 && i+1 < argc) {
+            params.sig_value = strtoull(argv[++i], NULL, 10);
+        }
+    }
+
+    /* Validate signature value */
+    if (params.sig_period > 0 && params.sig_value >= params.sig_period) {
+        fprintf(stderr, "Error: Signature value %llu must be < period %llu\n",
+                (unsigned long long)params.sig_value,
+                (unsigned long long)params.sig_period);
+        return 1;
     }
 
     if (inverse) return run_inverse(&params);
@@ -299,17 +436,9 @@ int main(int argc, char **argv) {
             }
         }
 
-        uint64_t k = (uint64_t)(display_time / 60) % params.period;
-        int s = (int)(display_time % 60);
-
-        /* Handle Kolmogorov variants */
-        if (params.num_variants > 1) {
-            uint64_t total_k = (uint64_t)(display_time / 60);
-            params.variant = (total_k / params.period) % params.num_variants;
-            k = total_k % params.period;
-        }
-
-        uint8_t mask = get_mask(k, s, &params);
+        /* Get mask for this second */
+        uint64_t t = (uint64_t)display_time;
+        uint8_t mask = get_mask(t, &params);
 
         if (inplace && frame > 0 && IS_TTY()) printf("\033[13A");
 

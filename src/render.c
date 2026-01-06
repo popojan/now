@@ -108,9 +108,11 @@ static void setup_borders(const render_opts_t *opts) {
 void render_opts_init(render_opts_t *opts) {
     opts->ascii = 0;
     opts->half_width = 0;
-    opts->wide_fills = 1;  /* Default: CJK wide */
-    opts->fills = "\xe6\x97\xa5\xe6\x9c\x88\xe7\x81\xab\xe6\xb0\xb4\xe6\x9c\xa8\xe9\x87\x91\xe5\x9c\x9f";  /* 日月火水木金土 */
-    opts->preset = "cjk";
+    opts->wide_fills = 0;
+    opts->fills = NULL;
+    opts->preset = NULL;
+    /* Apply default preset (cjk) */
+    render_apply_preset(opts, "cjk");
 }
 
 int render_apply_preset(render_opts_t *opts, const char *preset_name) {
