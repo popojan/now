@@ -82,16 +82,16 @@ static void usage(const char *prog) {
     printf("              'now' = start of current minute (synced with wall clock)\n");
     printf("  -t T        Start at specific second (overrides wall clock sync)\n\n");
     printf("Signatures:\n");
-    printf("  -P PERIOD   Signature period (must be coprime with 60)\n");
-    printf("              Valid periods have no factors 2, 3, or 5\n");
-    printf("              Examples: 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 49...\n");
-    printf("  -N VALUE    Encode VALUE (0 to PERIOD-1) in signature\n\n");
+    printf("  -P VALUE    Encode VALUE as clock signature (auto-detected from recordings)\n");
+    printf("              Must be coprime with 60 (no factors 2, 3, or 5)\n");
+    printf("              Examples: 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47...\n");
+    printf("  -N SALT     Optional salt for era cycling (default: 0)\n\n");
     printf("Examples:\n");
     printf("  %s                        # Live clock (original 88B-year period)\n", prog);
     printf("  %s -l -p emoji            # In-place with emoji\n", prog);
     printf("  %s -n 60 -s | %s -i       # Round-trip test\n", prog, prog);
-    printf("  %s -P 7 -N 3 -n 60 -s     # Encode value 3 with period 7\n", prog);
-    printf("  %s -P 7 -n 60 -s | %s -P 7 -i  # Round-trip with signature\n", prog, prog);
+    printf("  %s -P 7 -n 60 -s          # Clock with signature 7\n", prog);
+    printf("  %s -P 7 -n 120 -s | %s -i # Encode and auto-detect signature\n", prog, prog);
 }
 
 /* ============ Inverse Mode ============ */
