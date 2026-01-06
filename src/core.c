@@ -3,6 +3,7 @@
  */
 
 #include "core.h"
+#include <stdio.h>
 #include <string.h>
 
 /* Cell combinations for each second - stored as bitmask
