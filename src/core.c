@@ -26,24 +26,26 @@ const uint8_t COMBO_CNT[60] = {
 };
 
 void clock_params_init(clock_params_t *params) {
-    params->period = PERIOD_ORIGINAL;
-    params->num_variants = 1;
-    params->variant = 0;
+    params->sig_period = 0;
+    params->sig_value = 0;
 }
 
-/* Simple hash for variant permutation */
-static uint32_t hash32(uint32_t x) {
-    x ^= x >> 16;
-    x *= 0x85ebca6b;
-    x ^= x >> 13;
-    x *= 0xc2b2ae35;
-    x ^= x >> 16;
-    return x;
+uint64_t gcd(uint64_t a, uint64_t b) {
+    while (b) {
+        uint64_t t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
 }
 
-/* Original perm_index algorithm (compatible with now.c and web) */
+int is_coprime_60(uint64_t n) {
+    return gcd(n, 60) == 1;
+}
+
+/* Original perm_index algorithm (compatible with web version) */
 static int perm_index_original(uint64_t k, int s) {
-    k = k % PERIOD_ORIGINAL;
+    k = k % PERIOD_ORIGINAL_MINUTES;
 
     int m = COMBO_CNT[s];
     if (m == 1) return 0;
@@ -69,37 +71,25 @@ static int perm_index_original(uint64_t k, int s) {
     return 0;
 }
 
-/* Simplified perm_index for custom periods (testing) */
-static int perm_index_simple(uint64_t k, int s, uint64_t period) {
-    k = k % period;
+int perm_index(uint64_t t, const clock_params_t *params) {
+    int s = (int)(t % 60);
+    uint64_t k = t / 60;
     int m = COMBO_CNT[s];
+
     if (m == 1) return 0;
-    return (int)((k * 7 + s * 13) % m);
-}
 
-int perm_index(uint64_t k, int s, const clock_params_t *params) {
-    int base_idx;
-
-    if (params->period == PERIOD_ORIGINAL) {
-        base_idx = perm_index_original(k, s);
-    } else {
-        base_idx = perm_index_simple(k, s, params->period);
+    /* Encode signature N into k: combined = k * P + N */
+    uint64_t k_combined = k;
+    if (params->sig_period > 0) {
+        k_combined = k * params->sig_period + params->sig_value;
     }
 
-    /* Apply Kolmogorov variant permutation if enabled */
-    if (params->num_variants > 1 && params->variant > 0) {
-        int m = COMBO_CNT[s];
-        if (m > 1) {
-            uint32_t perm_seed = hash32((uint32_t)(params->variant * 1000 + s));
-            base_idx = (base_idx + (int)(perm_seed % m)) % m;
-        }
-    }
-
-    return base_idx;
+    return perm_index_original(k_combined, s);
 }
 
-uint8_t get_mask(uint64_t k, int s, const clock_params_t *params) {
-    int idx = perm_index(k, s, params);
+uint8_t get_mask(uint64_t t, const clock_params_t *params) {
+    int s = (int)(t % 60);
+    int idx = perm_index(t, params);
     return COMBOS[s][idx];
 }
 
@@ -122,34 +112,7 @@ int find_combo_idx(int s, uint8_t mask) {
     return -1;
 }
 
-/* ============ Divisors and Signatures ============ */
-
-int get_divisors(uint64_t n, uint64_t *out, int max_out) {
-    if (n == 0 || max_out <= 0) return 0;
-
-    int count = 0;
-    for (uint64_t i = 1; i * i <= n && count < max_out; i++) {
-        if (n % i == 0) {
-            out[count++] = i;
-            if (i != n / i && count < max_out) {
-                out[count++] = n / i;
-            }
-        }
-    }
-
-    /* Simple bubble sort (divisor count is typically small) */
-    for (int i = 0; i < count - 1; i++) {
-        for (int j = i + 1; j < count; j++) {
-            if (out[i] > out[j]) {
-                uint64_t tmp = out[i];
-                out[i] = out[j];
-                out[j] = tmp;
-            }
-        }
-    }
-
-    return count;
-}
+/* ============ Signatures ============ */
 
 int factorize(uint64_t n, uint64_t *primes, int *exps, int max_factors) {
     int count = 0;
@@ -177,82 +140,107 @@ int factorize(uint64_t n, uint64_t *primes, int *exps, int max_factors) {
     return count;
 }
 
-uint64_t get_signature(uint64_t elapsed_minutes, uint64_t divisor) {
-    return elapsed_minutes % divisor;
-}
-
-void get_all_signatures(uint64_t elapsed_minutes, uint64_t period,
-                        uint64_t *divisors, uint64_t *sigs, int num_divisors) {
-    for (int i = 0; i < num_divisors; i++) {
-        sigs[i] = elapsed_minutes % divisors[i];
-    }
+uint64_t get_signature(uint64_t t, uint64_t period) {
+    return t % period;
 }
 
 /* ============ Inverse (reconstruction) ============ */
 
-/* Verify k against observations, return match count (0-60) */
-static int verify_k(uint64_t k, uint8_t masks[60], int rot,
-                    const clock_params_t *params) {
+/* Verify k_combined against observations spanning two minutes.
+ * When first_sec > 0: seconds 0..first_sec-1 from minute k,
+ *                     seconds first_sec..59 from minute k-1.
+ * For signature mode: k_combined difference between minutes is P (not 1).
+ * Returns match count (0-60). */
+static int verify_k_spanning(uint64_t k_combined, uint8_t masks[60], int rot,
+                             int first_sec, const clock_params_t *params) {
+    /* Step between consecutive minutes in k_combined space */
+    uint64_t step = (params->sig_period > 0) ? params->sig_period : 1;
+    uint64_t k_combined_prev = (k_combined >= step) ? k_combined - step
+                               : PERIOD_ORIGINAL_MINUTES - step + k_combined;
     int matches = 0;
+
     for (int s = 0; s < 60; s++) {
         int frame_idx = (s + rot) % 60;
-        uint8_t expected = get_mask(k, s, params);
-        if (expected == masks[frame_idx]) matches++;
+        uint64_t k_eff;
+        if (first_sec == 0) {
+            k_eff = k_combined;
+        } else if (s < first_sec) {
+            k_eff = k_combined;       /* Seconds 0..first_sec-1 from minute k */
+        } else {
+            k_eff = k_combined_prev;  /* Seconds first_sec..59 from minute k-1 */
+        }
+        int expected_idx = perm_index_original(k_eff, s);
+        uint8_t expected_mask = COMBOS[s][expected_idx];
+        if (expected_mask == masks[frame_idx]) matches++;
     }
     return matches;
 }
 
-int inverse_minute(uint8_t masks[60], const clock_params_t *params, uint64_t *out_k) {
-    /* For original period, use optimized bit extraction */
-    if (params->period == PERIOD_ORIGINAL) {
-        for (int rot = 0; rot < 60; rot++) {
-            uint64_t k2_bits = 0, k4_bits = 0;
-            int k3_digits[16];
-            int n2 = 0, n3 = 0, n4 = 0;
-            int valid = 1;
+/* Exact reconstruction of rest (k2|k4) using bit-by-bit subtraction.
+ * Given: K_known bits, L_known bits, P, relationship L_rest = K_rest - P
+ * Returns K_rest exactly. Sets borrow_out for k3 calculation. */
+static uint32_t reconstruct_rest_exact(int first_sec, uint32_t K_known, uint32_t L_known,
+                                       uint32_t P_rest, int *borrow_out) {
+    uint32_t K_rest = 0;
 
-            for (int s = 0; s < 60 && valid; s++) {
-                int frame_idx = (s + rot) % 60;
-                uint8_t mask = masks[frame_idx];
-                int sum = mask_to_sum(mask) % 60;
+    /* Compute bit masks: which positions are from K vs L */
+    uint32_t K_mask = 0, L_mask = 0;
+    int n2 = 0, n4 = 0;
 
-                if (sum != s) { valid = 0; break; }
+    for (int s = 0; s < 60; s++) {
+        int m = COMBO_CNT[s];
+        int is_K = (first_sec == 0) || (s < first_sec);
 
-                int idx = find_combo_idx(s, mask);
-                if (idx < 0) { valid = 0; break; }
-
-                int m = COMBO_CNT[s];
-                if (m == 1) continue;
-
-                if (m == 2) {
-                    k2_bits |= ((uint64_t)idx << (29 - n2));
-                    n2++;
-                } else if (m == 3) {
-                    if (n3 < 16) k3_digits[n3++] = idx;
-                } else if (m == 4) {
-                    k4_bits |= ((uint64_t)idx << (10 - 2*n4));
-                    n4++;
-                }
-            }
-
-            if (!valid) continue;
-
-            uint64_t k3_val = 0;
-            for (int i = 0; i < n3; i++) {
-                k3_val = k3_val * 3 + k3_digits[i];
-            }
-            uint64_t k_candidate = k3_val * 1073741824ULL + (k2_bits | k4_bits);
-
-            int matches = verify_k(k_candidate, masks, rot, params);
-            if (matches >= 54) {
-                *out_k = k_candidate;
-                return rot;
-            }
+        if (m == 2) {
+            int bit_pos = 29 - n2;
+            if (is_K) K_mask |= (1U << bit_pos);
+            else L_mask |= (1U << bit_pos);
+            n2++;
+        } else if (m == 4) {
+            int bit_pos = 10 - 2 * n4;
+            if (is_K) K_mask |= (3U << bit_pos);
+            else L_mask |= (3U << bit_pos);
+            n4++;
         }
-        return -1;
     }
 
-    /* For custom periods, use brute-force search */
+    /* Solve bit by bit from LSB to MSB using subtraction relationship:
+     * L_rest = K_rest - P_rest (mod 2^30)
+     * If we know K_bit: use it directly
+     * If we know L_bit: K_bit = L_bit XOR P_bit XOR borrow */
+    int borrow = 0;
+    for (int i = 0; i < 30; i++) {
+        int P_bit = (P_rest >> i) & 1;
+        int K_bit;
+
+        if ((K_mask >> i) & 1) {
+            /* We know K_bit directly */
+            K_bit = (K_known >> i) & 1;
+        } else {
+            /* We know L_bit, compute K_bit: K = L + P + borrow (in subtraction sense) */
+            int L_bit = (L_known >> i) & 1;
+            K_bit = (L_bit + P_bit + borrow) & 1;
+        }
+
+        K_rest |= ((uint32_t)K_bit << i);
+
+        /* Compute next borrow: borrow if K_bit < P_bit + current_borrow */
+        int sum = P_bit + borrow;
+        borrow = (K_bit < sum) ? 1 : 0;
+    }
+
+    *borrow_out = borrow;
+    return K_rest;
+}
+
+int inverse_time(uint8_t masks[60], const clock_params_t *params,
+                 uint64_t *out_t, uint64_t *out_sig) {
+
+    uint64_t P = (params->sig_period > 0) ? params->sig_period : 1;
+    uint32_t P_rest = (uint32_t)(P % (1ULL << 30));
+    uint64_t P_k3 = P / (1ULL << 30);  /* How P affects k3 part */
+
+    /* Try all 60 rotations to find the starting second */
     for (int rot = 0; rot < 60; rot++) {
         /* First verify rotation is valid (sums match seconds) */
         int valid = 1;
@@ -263,39 +251,198 @@ int inverse_minute(uint8_t masks[60], const clock_params_t *params, uint64_t *ou
         }
         if (!valid) continue;
 
-        /* Try all k values for this period */
-        for (uint64_t k = 0; k < params->period; k++) {
-            int matches = verify_k(k, masks, rot, params);
-            if (matches >= 54) {
-                *out_k = k;
+        int first_sec = (rot == 0) ? 0 : (60 - rot);
+
+        /* Extract bits separately for each minute:
+         * - K bits from seconds 0..first_sec-1 (minute k)
+         * - L bits from seconds first_sec..59 (minute k-1, value K-P)
+         */
+        uint32_t K_rest_known = 0, L_rest_known = 0;
+        int K_k3[16] = {0}, L_k3[16] = {0};
+        int K_k3_mask[16] = {0};  /* 1 if we know this k3 digit from K */
+        int n2 = 0, n3 = 0, n4 = 0;
+        valid = 1;
+
+        for (int s = 0; s < 60 && valid; s++) {
+            int frame_idx = (s + rot) % 60;
+            uint8_t mask = masks[frame_idx];
+
+            int idx = find_combo_idx(s, mask);
+            if (idx < 0) { valid = 0; break; }
+
+            int m = COMBO_CNT[s];
+            if (m == 1) continue;
+
+            int is_from_K = (first_sec == 0) || (s < first_sec);
+
+            if (m == 2) {
+                if (is_from_K)
+                    K_rest_known |= ((uint32_t)idx << (29 - n2));
+                else
+                    L_rest_known |= ((uint32_t)idx << (29 - n2));
+                n2++;
+            } else if (m == 3) {
+                if (n3 < 16) {
+                    if (is_from_K) {
+                        K_k3[n3] = idx;
+                        K_k3_mask[n3] = 1;
+                    } else {
+                        L_k3[n3] = idx;
+                        K_k3_mask[n3] = 0;
+                    }
+                }
+                n3++;
+            } else if (m == 4) {
+                if (is_from_K)
+                    K_rest_known |= ((uint32_t)idx << (10 - 2*n4));
+                else
+                    L_rest_known |= ((uint32_t)idx << (10 - 2*n4));
+                n4++;
+            }
+        }
+
+        if (!valid) continue;
+
+        /* No crossing: all data from single minute - exact reconstruction */
+        if (first_sec == 0) {
+            uint64_t K_k3_val = 0;
+            for (int i = 0; i < 16; i++) {
+                K_k3_val = K_k3_val * 3 + K_k3[i];
+            }
+            uint64_t k_combined = K_k3_val * (1ULL << 30) + K_rest_known;
+
+            if (verify_k_spanning(k_combined, masks, rot, first_sec, params) == 60) {
+                uint64_t k_original = k_combined;
+                uint64_t sig_decoded = 0;
+                if (params->sig_period > 0) {
+                    sig_decoded = k_combined % params->sig_period;
+                    k_original = k_combined / params->sig_period;
+                }
+                *out_t = k_original * 60;
+                if (out_sig) *out_sig = sig_decoded;
                 return rot;
             }
+            continue;
+        }
+
+        /* Crossing case: exact reconstruction using relationship L = K - P */
+
+        /* Step 1: Exact reconstruction of rest part */
+        int borrow_from_rest;
+        uint32_t K_rest = reconstruct_rest_exact(first_sec, K_rest_known,
+                                                  L_rest_known, P_rest,
+                                                  &borrow_from_rest);
+
+        /* Step 2: For k3 part, enumerate unknown digits
+         * L_k3_val = K_k3_val - borrow_from_rest - P_k3
+         * We know some digits of K_k3, some of L_k3.
+         * Try all combinations of unknown K_k3 digits. */
+
+        int num_unknown = 0;
+        int unknown_pos[16];
+        for (int i = 0; i < 16; i++) {
+            if (!K_k3_mask[i]) {
+                unknown_pos[num_unknown++] = i;
+            }
+        }
+
+        /* Enumerate all 3^num_unknown combinations */
+        int num_combos = 1;
+        for (int i = 0; i < num_unknown; i++) num_combos *= 3;
+
+        int found = 0;
+        uint64_t found_k = 0;
+
+        for (int combo = 0; combo < num_combos && !found; combo++) {
+            /* Set unknown K_k3 digits based on combo */
+            int temp = combo;
+            for (int i = 0; i < num_unknown; i++) {
+                K_k3[unknown_pos[i]] = temp % 3;
+                temp /= 3;
+            }
+
+            /* Compute K_k3_val */
+            uint64_t K_k3_val = 0;
+            for (int i = 0; i < 16; i++) {
+                K_k3_val = K_k3_val * 3 + K_k3[i];
+            }
+
+            /* Compute L_k3_val = K_k3_val - borrow - P_k3 */
+            uint64_t total_borrow = borrow_from_rest + P_k3;
+            if (K_k3_val < total_borrow) continue;  /* Would underflow */
+            uint64_t L_k3_val = K_k3_val - total_borrow;
+
+            /* Extract L_k3 digits and verify against known L_k3 */
+            int L_k3_digits[16];
+            uint64_t temp_val = L_k3_val;
+            for (int i = 15; i >= 0; i--) {
+                L_k3_digits[i] = temp_val % 3;
+                temp_val /= 3;
+            }
+
+            int match = 1;
+            for (int i = 0; i < 16 && match; i++) {
+                if (!K_k3_mask[i]) {
+                    /* This digit comes from L, verify it */
+                    if (L_k3_digits[i] != L_k3[i]) match = 0;
+                }
+            }
+
+            if (match) {
+                uint64_t k_combined = K_k3_val * (1ULL << 30) + K_rest;
+                if (verify_k_spanning(k_combined, masks, rot, first_sec, params) == 60) {
+                    found = 1;
+                    found_k = k_combined;
+                }
+            }
+        }
+
+        if (found) {
+            uint64_t k_original = found_k;
+            uint64_t sig_decoded = 0;
+            if (params->sig_period > 0) {
+                sig_decoded = found_k % params->sig_period;
+                k_original = found_k / params->sig_period;
+            }
+            uint64_t first_min = (k_original > 0) ? k_original - 1 : k_original;
+            *out_t = first_min * 60 + first_sec;
+            if (out_sig) *out_sig = sig_decoded;
+            return rot;
         }
     }
 
     return -1;
 }
 
-int inverse_extended(uint8_t (*observed_minutes)[60], int num_minutes,
-                     const clock_params_t *params,
-                     uint64_t *out_elapsed, uint64_t *out_variant) {
-    if (num_minutes < 1) return -1;
+uint64_t detect_signature_period(uint8_t *masks, int num_frames) {
+    if (num_frames < 120) return 0;  /* Need at least 2 minutes */
 
-    /* First, decode the first minute to get base k */
-    uint64_t k;
-    int rot = inverse_minute(observed_minutes[0], params, &k);
-    if (rot < 0) return -1;
+    /* Look for repeating patterns in variant selections */
+    /* For each candidate period P (coprime with 60), check if pattern repeats */
+    uint64_t candidates[] = {7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 49, 53, 59, 61, 67, 71, 73, 77, 79, 83, 89, 97};
+    int num_candidates = sizeof(candidates) / sizeof(candidates[0]);
 
-    /* If no variants, we're done */
-    if (params->num_variants <= 1) {
-        *out_elapsed = k * 60 + (60 - rot) % 60;
-        *out_variant = 0;
-        return 0;
+    for (int c = 0; c < num_candidates; c++) {
+        uint64_t P = candidates[c];
+        if ((int)(2 * P) > num_frames) continue;
+
+        /* Check if masks[i] pattern repeats with period P */
+        int matches = 0;
+        int checks = 0;
+        for (int i = 0; i + (int)P < num_frames; i++) {
+            /* Only check seconds with multiple variants */
+            int s = i % 60;
+            if (COMBO_CNT[s] > 1) {
+                if (masks[i] == masks[i + (int)P]) matches++;
+                checks++;
+            }
+        }
+
+        /* If >90% match, likely found the period */
+        if (checks > 0 && matches * 10 >= checks * 9) {
+            return P;
+        }
     }
 
-    /* TODO: Try each variant, find best match across all observed minutes */
-    /* For now, return variant 0 */
-    *out_elapsed = k * 60 + (60 - rot) % 60;
-    *out_variant = 0;
     return 0;
 }
