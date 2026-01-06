@@ -44,7 +44,13 @@ Display:
 
 Time:
   -o ORIGIN   Custom origin (ISO 8601, e.g. 2000-01-01T00:00:00Z)
+              'now' = start of current minute (synced with wall clock)
   -t T        Use absolute time T seconds from origin
+
+Signatures:
+  -P VALUE    Clock signature (auto-detected from recordings)
+              Must be coprime with 60 (no factors 2, 3, or 5)
+  -N SALT     Optional salt for era cycling (default: 0)
 ```
 
 ## Examples
@@ -92,6 +98,12 @@ Generate 60 frames starting at t=740700 (minute 12345):
 Round-trip test:
 ```bash
 ./now -s -n 60 | ./now -i
+```
+
+Clock with signature (auto-detected from 2-minute recording):
+```bash
+./now -P 7 -l                   # Live clock with signature 7
+./now -P 7 -n 120 -s | ./now -i # Encode and auto-detect
 ```
 
 ## How It Works
