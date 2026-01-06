@@ -78,13 +78,12 @@ static void usage(const char *prog) {
     printf("Extended (infinite):\n");
     printf("  -P PERIOD   Custom period in minutes (default: original 88B-year)\n");
     printf("  -V VARIANTS Kolmogorov variants (extends period by factor)\n");
-    printf("  -v VARIANT  Use specific variant (0 to V-1)\n");
-    printf("  --sig       Show signature values for all divisors\n\n");
+    printf("  -v VARIANT  Use specific variant (0 to V-1)\n\n");
     printf("Examples:\n");
     printf("  %s                    # Live clock (original)\n", prog);
     printf("  %s -l -p emoji        # In-place with emoji\n", prog);
-    printf("  %s -P 60 --sig -n 1   # Show signatures for period 60\n", prog);
     printf("  %s -n 60 -s | %s -i   # Round-trip test\n", prog, prog);
+    printf("  %s -P 60 -n 60 -s | %s -P 60 -i  # Custom period with signatures\n", prog, prog);
 }
 
 /* ============ Inverse Mode ============ */
@@ -231,7 +230,7 @@ int main(int argc, char **argv) {
     clock_params_init(&params);
     render_opts_init(&render);
 
-    int inverse = 0, simulate = 0, inplace = 0, show_sig = 0;
+    int inverse = 0, simulate = 0, inplace = 0;
     int64_t num_frames = -1, start_t = -1;
     time_t origin = 0;
 
@@ -245,7 +244,6 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-l") == 0) inplace = 1;
         else if (strcmp(argv[i], "-s") == 0) simulate = 1;
         else if (strcmp(argv[i], "-i") == 0) inverse = 1;
-        else if (strcmp(argv[i], "--sig") == 0) show_sig = 1;
         else if (strcmp(argv[i], "-p") == 0 && i+1 < argc)
             render_apply_preset(&render, argv[++i]);
         else if (strcmp(argv[i], "-f") == 0 && i+1 < argc)
@@ -279,18 +277,6 @@ int main(int argc, char **argv) {
         elapsed = start_t;
     } else {
         elapsed = now_time - origin;
-    }
-
-    /* Show signatures header if requested */
-    if (show_sig && params.period != PERIOD_ORIGINAL) {
-        uint64_t divisors[64];
-        int num_div = get_divisors(params.period, divisors, 64);
-        printf("# Period: %llu, Divisors: ", (unsigned long long)params.period);
-        for (int i = 0; i < num_div; i++) {
-            printf("%llu", (unsigned long long)divisors[i]);
-            if (i < num_div - 1) printf(", ");
-        }
-        printf("\n\n");
     }
 
     /* Main loop */
@@ -328,18 +314,6 @@ int main(int argc, char **argv) {
         if (inplace && frame > 0 && IS_TTY()) printf("\033[13A");
 
         render_mask(mask, &render, stdout);
-
-        /* Show signatures if requested */
-        if (show_sig && params.period != PERIOD_ORIGINAL) {
-            uint64_t divisors[64];
-            int num_div = get_divisors(params.period, divisors, 64);
-            printf("k=%llu s=%d | ", (unsigned long long)k, s);
-            for (int i = 0; i < num_div && divisors[i] <= 20; i++) {
-                printf("sig[%llu]=%llu ", (unsigned long long)divisors[i],
-                       (unsigned long long)get_signature(k, divisors[i]));
-            }
-            printf("\n");
-        }
 
         printf("\n");
         fflush(stdout);
