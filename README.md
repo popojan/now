@@ -52,7 +52,7 @@ Encode a unique identifier into your clock that can be auto-detected from record
 ```
 
 Options:
-- `-P VALUE` - Clock signature (must be coprime with 60: no factors 2, 3, or 5)
+- `-P VALUE` - Clock signature (coprime with 60 recommended, but any value works)
 - `-N SALT` - Optional salt for era cycling (default: 0)
 
 The signature is encoded in the permutation pattern and auto-detected from any 2-minute recording, while preserving the full 88-billion-year period through era cycling.
