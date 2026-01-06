@@ -453,9 +453,13 @@ static int run_inverse(clock_params_t *params) {
                     consistent = 0;
             }
 
-            if (consistent && is_coprime_60(delta)) {
-                fprintf(stderr, "Detected P=%llu from k_combined differences\n",
+            if (consistent && delta > 0) {
+                fprintf(stderr, "Detected P=%llu from k_combined differences",
                         (unsigned long long)delta);
+                if (!is_coprime_60(delta)) {
+                    fprintf(stderr, " (warning: not coprime with 60)");
+                }
+                fprintf(stderr, "\n");
 
                 /* Verify with full verification, using N_0 (default 0) */
                 uint64_t test_t, test_sig;
@@ -506,9 +510,13 @@ output:;
     if (end_timestamp > 0) {
         time_t origin = end_timestamp - (time_t)elapsed_t - (total - 1);
         struct tm *utc = gmtime(&origin);
-        printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
-               utc->tm_year + 1900, utc->tm_mon + 1, utc->tm_mday,
-               utc->tm_hour, utc->tm_min, utc->tm_sec);
+        if (utc) {
+            printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
+                   utc->tm_year + 1900, utc->tm_mon + 1, utc->tm_mday,
+                   utc->tm_hour, utc->tm_min, utc->tm_sec);
+        } else {
+            printf("\norigin: (invalid timestamp)\n");
+        }
     }
 
     if (sig_P > 0) {
@@ -569,9 +577,8 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-P") == 0 && i+1 < argc) {
             params.sig_period = strtoull(argv[++i], NULL, 10);
             if (!is_coprime_60(params.sig_period)) {
-                fprintf(stderr, "Warning: Period %llu is not coprime with 60\n",
+                fprintf(stderr, "Note: P=%llu has factors of 2, 3, or 5 (reduced entropy)\n",
                         (unsigned long long)params.sig_period);
-                fprintf(stderr, "         Signatures may not be independent of second\n");
             }
         }
         else if (strcmp(argv[i], "-N") == 0 && i+1 < argc) {
