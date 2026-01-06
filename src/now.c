@@ -85,7 +85,7 @@ static void usage(const char *prog) {
     printf("  -P PERIOD   Signature period (must be coprime with 60)\n");
     printf("              Valid periods have no factors 2, 3, or 5\n");
     printf("              Examples: 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 49...\n");
-    printf("  -N VALUE    Encode VALUE (0 to PERIOD-1) in signature (default: 1)\n\n");
+    printf("  -N VALUE    Encode VALUE (0 to PERIOD-1) in signature\n\n");
     printf("Examples:\n");
     printf("  %s                        # Live clock (original 88B-year period)\n", prog);
     printf("  %s -l -p emoji            # In-place with emoji\n", prog);
@@ -287,19 +287,32 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
     return 0;
 }
 
-/* Verify P by checking ALL available windows give consistent signature */
+/* Verify P by checking ALL available windows give consistent signature.
+ * For auto-detect: assume era 0 by setting sig_value = detected N_era */
 static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
                               uint64_t *out_t, uint64_t *out_sig) {
     clock_params_t test_params;
     clock_params_init(&test_params);
     test_params.sig_period = P;
+    /* First pass: detect N_era to use as N_0 (assume era 0) */
+    test_params.sig_value = 0;
 
     int num_windows = num_frames / 60;
     if (num_windows < 1) return 0;
 
     uint64_t first_t = 0, first_sig = 0;
-    int first_rot = -1;
 
+    /* First window to detect N_era */
+    {
+        uint64_t t, sig;
+        int rot = inverse_time(masks, &test_params, &t, &sig);
+        if (rot < 0) return 0;
+        first_sig = sig;
+        /* Now set N_0 = N_era to assume era 0 */
+        test_params.sig_value = sig;
+    }
+
+    /* Re-run with correct N_0 */
     for (int w = 0; w < num_windows; w++) {
         uint64_t t, sig;
         int rot = inverse_time(masks + w * 60, &test_params, &t, &sig);
@@ -307,8 +320,6 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
 
         if (w == 0) {
             first_t = t;
-            first_sig = sig;
-            first_rot = rot;
         } else {
             /* Signature must be identical across all windows */
             if (sig != first_sig) return 0;
@@ -506,7 +517,6 @@ int main(int argc, char **argv) {
     int inverse = 0, simulate = 0, inplace = 0;
     int64_t num_frames = -1, start_t = -1;
     time_t origin = 0;
-    int n_specified = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -545,14 +555,9 @@ int main(int argc, char **argv) {
         }
         else if (strcmp(argv[i], "-N") == 0 && i+1 < argc) {
             params.sig_value = strtoull(argv[++i], NULL, 10);
-            n_specified = 1;
         }
     }
 
-    /* Default N₀ to 1 when P is specified but N is not */
-    if (params.sig_period > 1 && !n_specified) {
-        params.sig_value = 1;
-    }
 
     /* Validate signature value */
     if (params.sig_period > 0 && params.sig_value >= params.sig_period) {
