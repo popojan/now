@@ -81,11 +81,10 @@ static void usage(const char *prog) {
     printf("  -o ORIGIN   Origin timestamp (ISO 8601)\n");
     printf("  -t T        Start at specific second from origin\n\n");
     printf("Signatures:\n");
-    printf("  -P PERIOD   Signature period in seconds (must be coprime with 60)\n");
+    printf("  -P PERIOD   Signature period (must be coprime with 60)\n");
     printf("              Valid periods have no factors 2, 3, or 5\n");
     printf("              Examples: 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 49...\n");
-    printf("  -N VALUE    Encode VALUE (0 to PERIOD-1) in signature\n");
-    printf("              Changes variant selection to encode custom data\n\n");
+    printf("  -N VALUE    Encode VALUE (0 to PERIOD-1) in signature\n\n");
     printf("Examples:\n");
     printf("  %s                        # Live clock (original 88B-year period)\n", prog);
     printf("  %s -l -p emoji            # In-place with emoji\n", prog);
@@ -326,6 +325,8 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
 static int run_inverse(clock_params_t *params) {
     uint8_t masks[600];  /* Up to 10 minutes */
     int total = 0;
+    int align_start = -1;  /* First frame at second 0 */
+    int need_aligned = (params->sig_period == 0) ? 120 : 60;  /* 2 min for auto, 1 for known P */
 
     fprintf(stderr, "Reading frames from stdin...\n");
     while (total < 600) {
@@ -334,6 +335,17 @@ static int run_inverse(clock_params_t *params) {
         masks[total++] = m;
         int sum = mask_to_sum(m) % 60;
         fprintf(stderr, "\rFrame %d: sum=%d  ", total, sum);
+
+        /* Track first aligned position */
+        if (align_start < 0 && sum == 0) {
+            align_start = total - 1;
+        }
+
+        /* Stop early if we have enough aligned data */
+        if (align_start >= 0 && (total - align_start) >= need_aligned) {
+            fprintf(stderr, "\rHave enough data, stopping read.      \n");
+            break;
+        }
     }
     fprintf(stderr, "\n");
 
@@ -364,83 +376,91 @@ static int run_inverse(clock_params_t *params) {
         return 0;
     }
 
-    /* Auto-detect P: limit based on available verification windows
-     *
-     * With M minutes, false positive rate for one P = (1/P)^(M-1)
-     * We test ~0.27*max_P candidates (coprime with 60 fraction)
-     * Total FP rate ≈ 0.27 * sum_{P=7}^{max_P} (1/P)^(M-1)
-     *
-     * Conservative limits for ~99% overall confidence:
-     * M=2: max_P ≈ 50 (sum of 1/P for P=7..50 ≈ 2, times 0.27 ≈ 0.5, risky)
-     * M=3: max_P ≈ 1000 (sum of 1/P² ≈ 0.15)
-     * M=4+: max_P very large (sum of 1/P³ converges fast)
+    /* Fast P detection using k_combined differences between windows.
+     * With P=1 (no signature), inverse_time returns raw k_combined.
+     * For consecutive windows: delta = k_combined[w+1] - k_combined[w] = P
      */
-    uint64_t max_P;
-    if (num_minutes <= 1) {
-        fprintf(stderr, "Warning: Only 1 minute - cannot verify, trying small P\n");
-        max_P = 13;  /* Only smallest coprimes: 7, 11, 13 */
-    } else if (num_minutes == 2) {
-        max_P = 50;  /* Conservative for 2 windows */
-    } else if (num_minutes == 3) {
-        max_P = 1000;
-    } else if (num_minutes == 4) {
-        max_P = 10000;
-    } else {
-        max_P = 100000;  /* 5+ minutes: very high confidence */
-    }
-
-    fprintf(stderr, "Auto-detecting signature period (max P=%llu)...\n",
-            (unsigned long long)max_P);
 
     uint64_t best_P = 0;
     uint64_t best_t = 0, best_sig = 0;
 
-    for (uint64_t P = 7; P <= max_P; P++) {
-        if (!is_coprime_60(P)) continue;
-
-        uint64_t test_t, test_sig;
-        if (num_minutes >= 2) {
-            /* Verify across all available windows */
-            if (!verify_period_full(masks, total, P, &test_t, &test_sig)) continue;
-        } else {
-            /* Single minute - just try reconstruction */
-            clock_params_t test_params;
-            clock_params_init(&test_params);
-            test_params.sig_period = P;
-            int rot = inverse_time(masks, &test_params, &test_t, &test_sig);
-            if (rot < 0) continue;
+    if (num_minutes >= 2) {
+        /* Find first aligned window (starting at second 0) to avoid slow crossing case */
+        int align_offset = 0;
+        for (int i = 0; i < 60 && i < total; i++) {
+            if (mask_to_sum(masks[i]) % 60 == 0) {
+                align_offset = i;
+                break;
+            }
         }
 
-        best_P = P;
-        best_t = test_t;
-        best_sig = test_sig;
-        break;  /* First verified P is correct */
+        int aligned_frames = total - align_offset;
+        int aligned_minutes = aligned_frames / 60;
+
+        if (aligned_minutes < 2) {
+            fprintf(stderr, "Not enough aligned data for delta detection\n");
+        }
+
+        /* Reconstruct k_combined for each aligned window with P=1 */
+        clock_params_t base_params;
+        clock_params_init(&base_params);
+        base_params.sig_period = 1;  /* Raw k_combined */
+
+        uint64_t k_combined[10];
+        int valid = (aligned_minutes >= 2);
+
+        for (int w = 0; w < aligned_minutes && w < 10 && valid; w++) {
+            uint64_t t, sig;
+            int rot = inverse_time(masks + align_offset + w * 60, &base_params, &t, &sig);
+            if (rot < 0) { valid = 0; break; }
+            k_combined[w] = t / 60;  /* t = k * 60 when P=1, so k = t/60 */
+        }
+        num_minutes = aligned_minutes;
+
+        if (valid && num_minutes >= 2 && k_combined[1] > k_combined[0]) {
+            /* Compute delta between consecutive windows */
+            uint64_t delta = k_combined[1] - k_combined[0];
+
+            /* Verify delta is consistent across all windows */
+            int consistent = 1;
+            for (int w = 1; w < num_minutes - 1 && consistent; w++) {
+                if (k_combined[w + 1] - k_combined[w] != delta)
+                    consistent = 0;
+            }
+
+            if (consistent && is_coprime_60(delta)) {
+                fprintf(stderr, "Detected P=%llu from k_combined differences\n",
+                        (unsigned long long)delta);
+
+                /* Verify with full verification (use aligned data) */
+                uint64_t test_t, test_sig;
+                if (verify_period_full(masks + align_offset, aligned_frames, delta, &test_t, &test_sig)) {
+                    best_P = delta;
+                    best_t = test_t;
+                    best_sig = test_sig;
+                }
+            }
+        }
+
+        if (best_P == 0) {
+            fprintf(stderr, "Delta method failed - P may not be consistent\n");
+        }
+    } else {
+        fprintf(stderr, "Cannot auto-detect P with only 1 minute\n");
     }
+
 
     if (best_P > 0) {
         int first_sec = (int)(best_t % 60);
         printf("elapsed_seconds: %llu\n", (unsigned long long)best_t);
         printf("minute: %llu\n", (unsigned long long)(best_t / 60));
         printf("first_second: %d\n", first_sec);
-        printf("\nauto-detected signature:\n");
-        printf("  period: %llu\n", (unsigned long long)best_P);
-        printf("  value: %llu\n", (unsigned long long)best_sig);
-
-        /* Confidence: probability that wrong P would NOT produce M matching signatures
-         * False positive rate = (1/P)^(M-1), so confidence = 1 - (1/P)^(M-1) */
-        if (num_minutes >= 2) {
-            double fp_rate = 1.0;
-            for (int i = 1; i < num_minutes; i++) {
-                fp_rate /= (double)best_P;
-            }
-            double confidence = (1.0 - fp_rate) * 100.0;
-            if (confidence > 99.9999) {
-                printf("  confidence: >99.9999%% (%d minutes verified)\n", num_minutes);
-            } else {
-                printf("  confidence: %.4f%% (%d minutes verified)\n", confidence, num_minutes);
-            }
+        if (best_P == 1) {
+            printf("\n(no signature encoding detected)\n");
         } else {
-            printf("  confidence: unverified (only 1 minute)\n");
+            printf("\nauto-detected signature:\n");
+            printf("  period: %llu\n", (unsigned long long)best_P);
+            printf("  value: %llu\n", (unsigned long long)best_sig);
         }
     } else {
         /* No signature detected, try original mode */
@@ -455,8 +475,7 @@ static int run_inverse(clock_params_t *params) {
             printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
             printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
             printf("first_second: %d\n", first_sec);
-            printf("\n(no signature detected, or P > %llu)\n",
-                   (unsigned long long)max_P);
+            printf("\n(no signature detected)\n");
         } else {
             fprintf(stderr, "Error: Could not reconstruct\n");
             return 1;
