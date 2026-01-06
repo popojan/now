@@ -55,4 +55,9 @@ const char *render_mask_to_str(uint8_t mask, const render_opts_t *opts);
 /* Get list of preset names (NULL-terminated) */
 const char **render_get_presets(void);
 
+/* Border detection for inverse parsing */
+int is_top_left_corner(const char *s);      /* '.' or ┌ */
+int is_bottom_border_start(const char *s);  /* '\'' or └ or ├ or ─ */
+int is_vertical_border(const char *s);      /* '|' or │ */
+
 #endif /* NOW_RENDER_H */
