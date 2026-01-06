@@ -425,7 +425,23 @@ static int run_inverse(clock_params_t *params) {
         printf("\nauto-detected signature:\n");
         printf("  period: %llu\n", (unsigned long long)best_P);
         printf("  value: %llu\n", (unsigned long long)best_sig);
-        printf("  confidence: %d minutes verified\n", num_minutes);
+
+        /* Confidence: probability that wrong P would NOT produce M matching signatures
+         * False positive rate = (1/P)^(M-1), so confidence = 1 - (1/P)^(M-1) */
+        if (num_minutes >= 2) {
+            double fp_rate = 1.0;
+            for (int i = 1; i < num_minutes; i++) {
+                fp_rate /= (double)best_P;
+            }
+            double confidence = (1.0 - fp_rate) * 100.0;
+            if (confidence > 99.9999) {
+                printf("  confidence: >99.9999%% (%d minutes verified)\n", num_minutes);
+            } else {
+                printf("  confidence: %.4f%% (%d minutes verified)\n", confidence, num_minutes);
+            }
+        } else {
+            printf("  confidence: unverified (only 1 minute)\n");
+        }
     } else {
         /* No signature detected, try original mode */
         clock_params_t no_sig;
