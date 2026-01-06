@@ -325,13 +325,16 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
  *   1. No -N: Assume era=0, N_0 = decoded N_era (simple origin recovery)
  *   2. -N given: Use explicit N_0, calculate era from decoded N_era
  *
- * Origin is computed from current time: origin = now - elapsed_t
+ * Origin computation:
+ *   - Simulated (-s): origin = now - elapsed_t (frames are instant)
+ *   - Live: origin = start_time - elapsed_t (accounts for real-time delay)
  */
-static int run_inverse(clock_params_t *params, int n_specified) {
+static int run_inverse(clock_params_t *params, int n_specified, int simulate) {
     uint8_t masks[600];  /* Up to 10 minutes */
     int total = 0;
     int align_start = -1;  /* First frame at second 0 */
     int need_aligned = (params->sig_period == 0) ? 120 : 60;  /* 2 min for auto, 1 for known P */
+    time_t start_time = time(NULL);  /* For live mode correction */
 
     fprintf(stderr, "Reading frames from stdin...\n");
     while (total < 600) {
@@ -530,8 +533,9 @@ output:;
         printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
         printf("first_second: %d\n", first_sec);
 
-        /* Compute origin from current time (clock pattern encodes elapsed time) */
-        time_t origin = time(NULL) - (time_t)elapsed_t;
+        /* Compute origin: use start_time for live mode, now for simulated */
+        time_t ref_time = simulate ? time(NULL) : start_time;
+        time_t origin = ref_time - (time_t)elapsed_t;
         struct tm *utc = gmtime(&origin);
         if (utc) {
             printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
@@ -556,8 +560,9 @@ output_no_sig:;
         printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
         printf("first_second: %d\n", first_sec);
 
-        /* Compute origin from current time (clock pattern encodes elapsed time) */
-        time_t origin = time(NULL) - (time_t)elapsed_t;
+        /* Compute origin: use start_time for live mode, now for simulated */
+        time_t ref_time = simulate ? time(NULL) : start_time;
+        time_t origin = ref_time - (time_t)elapsed_t;
         struct tm *utc = gmtime(&origin);
         if (utc) {
             printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
@@ -633,7 +638,7 @@ int main(int argc, char **argv) {
     }
 
     if (inverse) {
-        return run_inverse(&params, n_specified);
+        return run_inverse(&params, n_specified, simulate);
     }
 
     /* Show era info when using signatures */
