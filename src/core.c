@@ -74,15 +74,25 @@ static int perm_index_original(uint64_t k, int s) {
 
 int perm_index(uint64_t t, const clock_params_t *params) {
     int s = (int)(t % 60);
-    uint64_t k = t / 60;
+    uint64_t minute = t / 60;
     int m = COMBO_CNT[s];
 
     if (m == 1) return 0;
 
-    /* Encode signature N into k: combined = k * P + N */
-    uint64_t k_combined = k;
-    if (params->sig_period > 0) {
-        k_combined = k * params->sig_period + params->sig_value;
+    uint64_t k_combined = minute;
+    if (params->sig_period > 1) {
+        uint64_t P = params->sig_period;
+        uint64_t N0 = params->sig_value;
+
+        /* Era cycling: each era lasts (PERIOD - N0) / P minutes */
+        uint64_t max_minute_per_era = (PERIOD_ORIGINAL_MINUTES - N0) / P;
+        uint64_t era = minute / max_minute_per_era;
+        uint64_t local_minute = minute % max_minute_per_era;
+
+        /* N advances by 1 each era */
+        uint64_t N_era = (N0 + era) % P;
+
+        k_combined = local_minute * P + N_era;
     }
 
     return perm_index_original(k_combined, s);
@@ -313,13 +323,23 @@ int inverse_time(uint8_t masks[60], const clock_params_t *params,
             uint64_t k_combined = K_k3_val * (1ULL << 30) + K_rest_known;
 
             if (verify_k_spanning(k_combined, masks, rot, first_sec, params) == 60) {
-                uint64_t k_original = k_combined;
+                uint64_t local_minute = k_combined;
                 uint64_t sig_decoded = 0;
                 if (params->sig_period > 0) {
-                    sig_decoded = k_combined % params->sig_period;
-                    k_original = k_combined / params->sig_period;
+                    uint64_t P = params->sig_period;
+                    uint64_t N0 = params->sig_value;
+                    uint64_t N_era = k_combined % P;
+                    local_minute = k_combined / P;
+                    sig_decoded = N_era;
+
+                    /* Era cycling: find era from N_era = (N0 + era) % P */
+                    uint64_t era = (N_era >= N0) ? (N_era - N0) : (P - N0 + N_era);
+                    uint64_t max_minute_per_era = (PERIOD_ORIGINAL_MINUTES - N0) / P;
+
+                    /* Compute real minute across eras */
+                    local_minute = era * max_minute_per_era + local_minute;
                 }
-                *out_t = k_original * 60;
+                *out_t = local_minute * 60;
                 if (out_sig) *out_sig = sig_decoded;
                 return rot;
             }
@@ -399,13 +419,23 @@ int inverse_time(uint8_t masks[60], const clock_params_t *params,
         }
 
         if (found) {
-            uint64_t k_original = found_k;
+            uint64_t local_minute = found_k;
             uint64_t sig_decoded = 0;
             if (params->sig_period > 0) {
-                sig_decoded = found_k % params->sig_period;
-                k_original = found_k / params->sig_period;
+                uint64_t P = params->sig_period;
+                uint64_t N0 = params->sig_value;
+                uint64_t N_era = found_k % P;
+                local_minute = found_k / P;
+                sig_decoded = N_era;
+
+                /* Era cycling: find era from N_era = (N0 + era) % P */
+                uint64_t era = (N_era >= N0) ? (N_era - N0) : (P - N0 + N_era);
+                uint64_t max_minute_per_era = (PERIOD_ORIGINAL_MINUTES - N0) / P;
+
+                /* Compute real minute across eras */
+                local_minute = era * max_minute_per_era + local_minute;
             }
-            uint64_t first_min = (k_original > 0) ? k_original - 1 : k_original;
+            uint64_t first_min = (local_minute > 0) ? local_minute - 1 : local_minute;
             *out_t = first_min * 60 + first_sec;
             if (out_sig) *out_sig = sig_decoded;
             return rot;
