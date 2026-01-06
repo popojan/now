@@ -25,10 +25,10 @@ clean:
 # Test: round-trip (generate -> inverse -> verify)
 test-roundtrip: $(TARGET)
 	@echo "=== Round-trip test (P auto-detect) ==="
-	$(TARGET) -P 7 -n 180 -s | $(TARGET) -i
+	$(TARGET) -P 7 -n 180 -s | $(TARGET) -i -s
 	@echo ""
 	@echo "=== Round-trip test (P specified) ==="
-	$(TARGET) -P 60 -n 120 -s | $(TARGET) -P 60 -i
+	$(TARGET) -P 60 -n 120 -s | $(TARGET) -P 60 -i -s
 
 # Test: signatures display
 test-signatures: $(TARGET)
