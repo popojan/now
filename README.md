@@ -7,7 +7,7 @@ These weights cover [Farey sequence](https://en.wikipedia.org/wiki/Farey_sequenc
 Period: $2^{30} \times 3^{16}$ min ≈ 88 billion years
 
 ```
-┌────────────┐
+┌──────────┐
 │土土土土木木│
 │土土土土木木│
 │土土土土木木│
@@ -18,7 +18,7 @@ Period: $2^{30} \times 3^{16}$ min ≈ 88 billion years
 │金金金月火火│
 │金金金水水水│
 │金金金水水水│
-└────────────┘
+└──────────┘
 ```
 
 ## How It Works
