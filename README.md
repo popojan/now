@@ -1,6 +1,6 @@
-# Mondrian Clock
+# Now
 
-A clock cycling through 60 states per minute, each a subset sum of {1, 2, 4, 6, 12, 15, 20}.
+A clock cycling through 60 states per minute, each a subset sum of {1, 2, 4, 6, 12, 15, 20} = {日, 月, 火, 水, 木, 金, 土}.
 
 These weights cover [Farey sequence](https://en.wikipedia.org/wiki/Farey_sequence) $F_6$ exactly.
 
