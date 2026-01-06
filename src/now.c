@@ -85,7 +85,7 @@ static void usage(const char *prog) {
     printf("  -P PERIOD   Signature period (must be coprime with 60)\n");
     printf("              Valid periods have no factors 2, 3, or 5\n");
     printf("              Examples: 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 49...\n");
-    printf("  -N VALUE    Encode VALUE (0 to PERIOD-1) in signature\n\n");
+    printf("  -N VALUE    Encode VALUE (0 to PERIOD-1) in signature (default: 1)\n\n");
     printf("Examples:\n");
     printf("  %s                        # Live clock (original 88B-year period)\n", prog);
     printf("  %s -l -p emoji            # In-place with emoji\n", prog);
@@ -373,7 +373,16 @@ static int run_inverse(clock_params_t *params) {
         printf("first_second: %d\n", first_sec);
         printf("\nsignature:\n");
         printf("  period: %llu\n", (unsigned long long)params->sig_period);
-        printf("  value: %llu\n", (unsigned long long)sig_value);
+        printf("  N_0: %llu\n", (unsigned long long)params->sig_value);
+        /* Compute era from decoded signature value */
+        uint64_t N0 = params->sig_value;
+        uint64_t P = params->sig_period;
+        uint64_t N_era = sig_value;
+        uint64_t era = (N_era >= N0) ? (N_era - N0) : (P - N0 + N_era);
+        printf("  era: %llu\n", (unsigned long long)era);
+        if (era > 0) {
+            printf("  N_era: %llu\n", (unsigned long long)N_era);
+        }
         return 0;
     }
 
@@ -461,7 +470,7 @@ static int run_inverse(clock_params_t *params) {
         } else {
             printf("\nauto-detected signature:\n");
             printf("  period: %llu\n", (unsigned long long)best_P);
-            printf("  value: %llu\n", (unsigned long long)best_sig);
+            printf("  N_era: %llu\n", (unsigned long long)best_sig);
         }
     } else {
         /* No signature detected, try original mode */
@@ -497,6 +506,7 @@ int main(int argc, char **argv) {
     int inverse = 0, simulate = 0, inplace = 0;
     int64_t num_frames = -1, start_t = -1;
     time_t origin = 0;
+    int n_specified = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -535,7 +545,13 @@ int main(int argc, char **argv) {
         }
         else if (strcmp(argv[i], "-N") == 0 && i+1 < argc) {
             params.sig_value = strtoull(argv[++i], NULL, 10);
+            n_specified = 1;
         }
+    }
+
+    /* Default N₀ to 1 when P is specified but N is not */
+    if (params.sig_period > 1 && !n_specified) {
+        params.sig_value = 1;
     }
 
     /* Validate signature value */
@@ -548,24 +564,21 @@ int main(int argc, char **argv) {
 
     if (inverse) return run_inverse(&params);
 
-    /* Check for signature overflow */
+    /* Show era info when using signatures */
     if (params.sig_period > 1) {
         time_t now_time = time(NULL);
         int64_t elapsed = (start_t >= 0) ? start_t : (now_time - origin);
         uint64_t minute = (uint64_t)(elapsed / 60);
-        uint64_t max_minute = (PERIOD_ORIGINAL_MINUTES - params.sig_value) / params.sig_period;
+        uint64_t N0 = params.sig_value;
+        uint64_t P = params.sig_period;
+        uint64_t max_minute_per_era = (PERIOD_ORIGINAL_MINUTES - N0) / P;
+        uint64_t era = minute / max_minute_per_era;
 
-        /* Show effective period in human-readable form */
-        double years = (double)max_minute / (60.0 * 24 * 365.25);
-
-        if (minute > max_minute) {
-            fprintf(stderr, "Warning: Minute %llu exceeds effective period for P=%llu, N=%llu\n",
-                    (unsigned long long)minute,
-                    (unsigned long long)params.sig_period,
-                    (unsigned long long)params.sig_value);
-            fprintf(stderr, "         Effective period: %llu minutes (%.1f years from origin)\n",
-                    (unsigned long long)max_minute, years);
-            fprintf(stderr, "         Signature will not round-trip. Use '-o now' or '-t 0'.\n");
+        if (era > 0) {
+            uint64_t N_era = (N0 + era) % P;
+            double years_per_era = (double)max_minute_per_era / (60.0 * 24 * 365.25);
+            fprintf(stderr, "Era %llu: N_era=%llu (era length: %.1e years)\n",
+                    (unsigned long long)era, (unsigned long long)N_era, years_per_era);
         }
     }
 
