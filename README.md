@@ -38,9 +38,24 @@ make
 ### Round-trip Test
 
 ```bash
-./now -a -s -n 60 | ./now -i
-# Output: 1970-01-01T00:00:00Z
+./now -s -n 60 | ./now -i
+# Output: elapsed_seconds: 0, minute: 0
 ```
+
+### Signatures
+
+Encode a unique identifier into your clock that can be auto-detected from recordings:
+
+```bash
+./now -P 7                      # Clock with signature 7
+./now -P 7 -n 120 -s | ./now -i # Encode and auto-detect (needs 2 min)
+```
+
+Options:
+- `-P VALUE` - Clock signature (must be coprime with 60: no factors 2, 3, or 5)
+- `-N SALT` - Optional salt for era cycling (default: 0)
+
+The signature is encoded in the permutation pattern and auto-detected from any 2-minute recording, while preserving the full 88-billion-year period through era cycling.
 
 ## Inverse Tool (Video)
 
