@@ -6,9 +6,20 @@ These weights cover [Farey sequence](https://en.wikipedia.org/wiki/Farey_sequenc
 
 Period: $2^{30} \times 3^{16}$ min ≈ 88 billion years
 
-[![Mondrian Clock](web/screenshot.png)](https://hraj.si/now)
-
-**[▶ hraj.si/now](https://hraj.si/now)** · **[Wallpaper Engine](https://steamcommunity.com/sharedfiles/filedetails/?id=3125524524)**
+```
+┌────────────┐
+│土土土土木木│
+│土土土土木木│
+│土土土土木木│
+│土土土土木木│
+│土土土土木木│
+│金金金日木木│
+│金金金月火火│
+│金金金月火火│
+│金金金水水水│
+│金金金水水水│
+└────────────┘
+```
 
 ## How It Works
 
@@ -16,39 +27,50 @@ The clock face consists of 7 rectangular cells with areas 1, 2, 4, 6, 12, 15, an
 
 ## Project Structure
 
+- `src/` - C terminal implementation
 - `web/` - Clock webpage (HTML/CSS/JS)
-- `terminal/` - C terminal implementation
 - `inverse/` - Python video analyzer (reconstructs clock origin from video recordings)
+- `tests/` - Test scripts
 
 ## Terminal Clock
 
-The `terminal/` directory contains a lightweight C implementation of the clock for terminal display. It supports both ASCII and Unicode modes, and includes inverse mode to decode frames.
-
-See [terminal/README.md](terminal/README.md) for full documentation.
-
-### Quick Start
+Build from repository root:
 
 ```bash
-cd terminal
 make
-./now              # Live clock
-./now -a -d        # ASCII with 4-color distinction
+bin/now            # Live clock
+bin/now -l         # In-place updates (no scroll)
+bin/now -p emoji   # Emoji preset
+```
+
+### Display Options
+
+```
+-a          ASCII borders
+-p PRESET   Preset: cjk (default), blocks, blocks1, distinct, kanji, emoji
+-f CHARS    Custom 7 UTF-8 fill characters
+-1          Half-width mode
+-w          Wide fills (for CJK/emoji)
+-l          In-place update (TTY only)
+-s          Simulate (fast, no delay)
+-i          Inverse: read frames, detect signature, output origin
 ```
 
 ### Round-trip Test
 
 ```bash
-./now -s -n 60 | ./now -i
-# Output: elapsed_seconds: 0, minute: 0
+bin/now -s -n 120 | bin/now -i -s
 ```
+
+Note: Use `-s` for both encoder and decoder when testing with simulated data.
 
 ### Signatures
 
 Encode a unique identifier into your clock that can be auto-detected from recordings:
 
 ```bash
-./now -P 7                      # Clock with signature 7
-./now -P 7 -n 120 -s | ./now -i # Encode and auto-detect (needs 2 min)
+bin/now -P 7 -l                       # Live clock with signature 7
+bin/now -P 7 -n 180 -s | bin/now -i -s # Encode and auto-detect
 ```
 
 Options:
@@ -123,24 +145,6 @@ Note: The clock period is 46,221,064,723,759,104 minutes
 - **Color-independent**: Works with any color scheme (standard colors, monochrome red, etc.)
 - **Sum-based seconds**: Cells shown at second S always sum to S, making detection FPS-independent
 - **Error correction**: Can fix single-cell detection errors using valid combination lookup
-
-## URL Parameters
-
-The clock webpage accepts URL parameters:
-
-- `origin` - Custom epoch (ISO 8601 format, e.g., `2000-01-01T00:00:00Z`)
-- `offset` - Year offset from origin
-- `period` - Time unit in minutes (1=minutes, 60=hours, 3600=days)
-- `mod` - Modulus for display (default: 60)
-
-Example: `https://hraj.si/now?origin=2000-01-01T00:00:00Z`
-
-## Click Interaction
-
-Click the clock to cycle through display modes:
-- **Minutes** (default): Pattern changes every second
-- **Hours**: Pattern changes every minute
-- **Days**: Pattern changes every hour
 
 ## Technical Details
 

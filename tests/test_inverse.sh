@@ -2,13 +2,14 @@
 # Unit tests for C inverse algorithm
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
-# Ensure binary exists (normally built via 'make test')
-if [ ! -f now ]; then
-    make now
+# Ensure binary exists
+if [ ! -f bin/now ]; then
+    make
 fi
 
+NOW=bin/now
 PASS=0
 FAIL=0
 
@@ -17,7 +18,9 @@ test_roundtrip() {
     local args="$2"
     local expected="$3"
 
-    result=$(./now $args -s -n 60 | ./now -i 2>/dev/null | tail -1)
+    # Note: -s flag needed for both encoder (instant generation) and decoder (instant input)
+    # Use 180 frames (3 minutes) to ensure enough data for signature auto-detection
+    result=$($NOW $args -s -n 180 | $NOW -i -s 2>/dev/null | grep "^origin:" | cut -d' ' -f2)
     if [ "$result" = "$expected" ]; then
         echo "✓ $desc"
         PASS=$((PASS + 1))
@@ -30,17 +33,19 @@ test_roundtrip() {
 echo "=== C Inverse Round-trip Tests ==="
 echo
 
-# Basic test - default origin (epoch) with live time calculation
-# This verifies the full round-trip works: generate -> parse -> recover origin
+# Basic test - default origin (epoch)
 test_roundtrip "Default origin (epoch)" "" "1970-01-01T00:00:00Z"
 
 # ASCII mode tests (same origin, different rendering)
 test_roundtrip "ASCII mode" "-a" "1970-01-01T00:00:00Z"
-test_roundtrip "ASCII distinct" "-a -d" "1970-01-01T00:00:00Z"
 
 # Custom origin tests
 test_roundtrip "Y2K origin" "-o 2000-01-01T00:00:00Z" "2000-01-01T00:00:00Z"
 test_roundtrip "Custom origin 2020" "-o 2020-06-15T12:30:00Z" "2020-06-15T12:30:00Z"
+
+# Signature tests
+test_roundtrip "Signature P=7" "-P 7" "1970-01-01T00:00:00Z"
+test_roundtrip "Signature P=7 N=3" "-P 7 -N 3" "1970-01-01T00:00:00Z"
 
 echo
 echo "=== Results ==="
