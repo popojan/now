@@ -553,13 +553,18 @@ int main(int argc, char **argv) {
         time_t now_time = time(NULL);
         int64_t elapsed = (start_t >= 0) ? start_t : (now_time - origin);
         uint64_t minute = (uint64_t)(elapsed / 60);
-        uint64_t max_minute = PERIOD_ORIGINAL_MINUTES / params.sig_period;
+        uint64_t max_minute = (PERIOD_ORIGINAL_MINUTES - params.sig_value) / params.sig_period;
+
+        /* Show effective period in human-readable form */
+        double years = (double)max_minute / (60.0 * 24 * 365.25);
 
         if (minute > max_minute) {
-            fprintf(stderr, "Warning: Current minute (%llu) exceeds max for P=%llu (%llu)\n",
+            fprintf(stderr, "Warning: Minute %llu exceeds effective period for P=%llu, N=%llu\n",
                     (unsigned long long)minute,
                     (unsigned long long)params.sig_period,
-                    (unsigned long long)max_minute);
+                    (unsigned long long)params.sig_value);
+            fprintf(stderr, "         Effective period: %llu minutes (%.1f years from origin)\n",
+                    (unsigned long long)max_minute, years);
             fprintf(stderr, "         Signature will not round-trip. Use '-o now' or '-t 0'.\n");
         }
     }
