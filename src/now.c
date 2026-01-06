@@ -78,8 +78,9 @@ static void usage(const char *prog) {
     printf("  -1          Half-width mode\n");
     printf("  -w          Wide fills (for CJK/emoji)\n\n");
     printf("Time:\n");
-    printf("  -o ORIGIN   Origin timestamp (ISO 8601)\n");
-    printf("  -t T        Start at specific second from origin\n\n");
+    printf("  -o ORIGIN   Origin timestamp (ISO 8601 or 'now')\n");
+    printf("              'now' = start of current minute (synced with wall clock)\n");
+    printf("  -t T        Start at specific second (overrides wall clock sync)\n\n");
     printf("Signatures:\n");
     printf("  -P PERIOD   Signature period (must be coprime with 60)\n");
     printf("              Valid periods have no factors 2, 3, or 5\n");
@@ -511,8 +512,15 @@ int main(int argc, char **argv) {
             render_apply_preset(&render, argv[++i]);
         else if (strcmp(argv[i], "-f") == 0 && i+1 < argc)
             render.fills = argv[++i];
-        else if (strcmp(argv[i], "-o") == 0 && i+1 < argc)
-            origin = parse_time(argv[++i]);
+        else if (strcmp(argv[i], "-o") == 0 && i+1 < argc) {
+            if (strcmp(argv[i+1], "now") == 0) {
+                /* Floor to start of current minute */
+                origin = (time(NULL) / 60) * 60;
+                i++;
+            } else {
+                origin = parse_time(argv[++i]);
+            }
+        }
         else if (strcmp(argv[i], "-t") == 0 && i+1 < argc)
             start_t = atoll(argv[++i]);
         else if (strcmp(argv[i], "-n") == 0 && i+1 < argc)
@@ -539,6 +547,22 @@ int main(int argc, char **argv) {
     }
 
     if (inverse) return run_inverse(&params);
+
+    /* Check for signature overflow */
+    if (params.sig_period > 1) {
+        time_t now_time = time(NULL);
+        int64_t elapsed = (start_t >= 0) ? start_t : (now_time - origin);
+        uint64_t minute = (uint64_t)(elapsed / 60);
+        uint64_t max_minute = PERIOD_ORIGINAL_MINUTES / params.sig_period;
+
+        if (minute > max_minute) {
+            fprintf(stderr, "Warning: Current minute (%llu) exceeds max for P=%llu (%llu)\n",
+                    (unsigned long long)minute,
+                    (unsigned long long)params.sig_period,
+                    (unsigned long long)max_minute);
+            fprintf(stderr, "         Signature will not round-trip. Use '-o now' or '-t 0'.\n");
+        }
+    }
 
     enable_vt();
     signal(SIGINT, handle_signal);
