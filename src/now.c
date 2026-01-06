@@ -288,31 +288,33 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
 }
 
 /* Verify P by checking ALL available windows give consistent signature.
- * For auto-detect: assume era 0 by setting sig_value = detected N_era */
+ * If known_N0 >= 0, use it; otherwise auto-detect (assume era 0). */
 static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
+                              int64_t known_N0,
                               uint64_t *out_t, uint64_t *out_sig) {
     clock_params_t test_params;
     clock_params_init(&test_params);
     test_params.sig_period = P;
-    /* First pass: detect N_era to use as N_0 (assume era 0) */
-    test_params.sig_value = 0;
 
     int num_windows = num_frames / 60;
     if (num_windows < 1) return 0;
 
     uint64_t first_t = 0, first_sig = 0;
 
-    /* First window to detect N_era */
-    {
+    if (known_N0 >= 0) {
+        /* User provided N_0 */
+        test_params.sig_value = (uint64_t)known_N0;
+    } else {
+        /* First pass: detect N_era to use as N_0 (assume era 0) */
+        test_params.sig_value = 0;
         uint64_t t, sig;
         int rot = inverse_time(masks, &test_params, &t, &sig);
         if (rot < 0) return 0;
         first_sig = sig;
-        /* Now set N_0 = N_era to assume era 0 */
         test_params.sig_value = sig;
     }
 
-    /* Re-run with correct N_0 */
+    /* Verify all windows */
     for (int w = 0; w < num_windows; w++) {
         uint64_t t, sig;
         int rot = inverse_time(masks + w * 60, &test_params, &t, &sig);
@@ -320,6 +322,7 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
 
         if (w == 0) {
             first_t = t;
+            first_sig = sig;
         } else {
             /* Signature must be identical across all windows */
             if (sig != first_sig) return 0;
@@ -453,9 +456,11 @@ static int run_inverse(clock_params_t *params) {
                 fprintf(stderr, "Detected P=%llu from k_combined differences\n",
                         (unsigned long long)delta);
 
-                /* Verify with full verification (use aligned data) */
+                /* Verify with full verification (use aligned data)
+                 * If user provided N_0 (sig_value > 0 or sig_period == 0), use it */
+                int64_t known_N0 = (params->sig_value > 0) ? (int64_t)params->sig_value : -1;
                 uint64_t test_t, test_sig;
-                if (verify_period_full(masks + align_offset, aligned_frames, delta, &test_t, &test_sig)) {
+                if (verify_period_full(masks + align_offset, aligned_frames, delta, known_N0, &test_t, &test_sig)) {
                     best_P = delta;
                     best_t = test_t;
                     best_sig = test_sig;
@@ -481,7 +486,19 @@ static int run_inverse(clock_params_t *params) {
         } else {
             printf("\nauto-detected signature:\n");
             printf("  period: %llu\n", (unsigned long long)best_P);
-            printf("  N_era: %llu\n", (unsigned long long)best_sig);
+            /* If user provided N_0, show era info */
+            if (params->sig_value > 0) {
+                uint64_t N0 = params->sig_value;
+                uint64_t N_era = best_sig;
+                uint64_t era = (N_era >= N0) ? (N_era - N0) : (best_P - N0 + N_era);
+                printf("  N_0: %llu\n", (unsigned long long)N0);
+                printf("  era: %llu\n", (unsigned long long)era);
+                if (era > 0) {
+                    printf("  N_era: %llu\n", (unsigned long long)N_era);
+                }
+            } else {
+                printf("  N_era: %llu\n", (unsigned long long)best_sig);
+            }
         }
     } else {
         /* No signature detected, try original mode */
