@@ -287,13 +287,48 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
     return 0;
 }
 
+/* Verify P by checking ALL available windows give consistent signature */
+static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
+                              uint64_t *out_t, uint64_t *out_sig) {
+    clock_params_t test_params;
+    clock_params_init(&test_params);
+    test_params.sig_period = P;
+
+    int num_windows = num_frames / 60;
+    if (num_windows < 1) return 0;
+
+    uint64_t first_t = 0, first_sig = 0;
+    int first_rot = -1;
+
+    for (int w = 0; w < num_windows; w++) {
+        uint64_t t, sig;
+        int rot = inverse_time(masks + w * 60, &test_params, &t, &sig);
+        if (rot < 0) return 0;
+
+        if (w == 0) {
+            first_t = t;
+            first_sig = sig;
+            first_rot = rot;
+        } else {
+            /* Signature must be identical across all windows */
+            if (sig != first_sig) return 0;
+            /* Time should increase by ~60 per window */
+            int64_t expected_t = (int64_t)first_t + w * 60;
+            if ((int64_t)t < expected_t - 5 || (int64_t)t > expected_t + 5) return 0;
+        }
+    }
+
+    *out_t = first_t;
+    *out_sig = first_sig;
+    return 1;
+}
+
 static int run_inverse(clock_params_t *params) {
-    uint8_t masks[60];
+    uint8_t masks[600];  /* Up to 10 minutes */
     int total = 0;
 
     fprintf(stderr, "Reading frames from stdin...\n");
-
-    while (total < 60) {
+    while (total < 600) {
         uint8_t m;
         if (parse_frame(stdin, &m) < 0) break;
         masks[total++] = m;
@@ -303,43 +338,112 @@ static int run_inverse(clock_params_t *params) {
     fprintf(stderr, "\n");
 
     if (total < 60) {
-        fprintf(stderr, "Error: Need 60 frames, got %d\n", total);
+        fprintf(stderr, "Error: Need at least 60 frames, got %d\n", total);
         return 1;
     }
 
-    uint64_t elapsed_t, sig_value;
-    int rot = inverse_time(masks, params, &elapsed_t, &sig_value);
-    if (rot < 0) {
-        fprintf(stderr, "Error: Could not reconstruct\n");
-        return 1;
-    }
+    int num_minutes = total / 60;
+    fprintf(stderr, "Have %d frames (%d complete minutes)\n", total, num_minutes);
 
-    int first_sec = (rot == 0) ? 0 : (60 - rot);
-
-    printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
-    printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
-    printf("first_second: %d\n", first_sec);
-
-    /* Show signature if period specified */
+    /* If P specified, just decode */
     if (params->sig_period > 0) {
-        if (!is_coprime_60(params->sig_period)) {
-            fprintf(stderr, "Warning: Period %llu is not coprime with 60\n",
-                    (unsigned long long)params->sig_period);
+        uint64_t elapsed_t, sig_value;
+        int rot = inverse_time(masks, params, &elapsed_t, &sig_value);
+        if (rot < 0) {
+            fprintf(stderr, "Error: Could not reconstruct\n");
+            return 1;
         }
+        int first_sec = (rot == 0) ? 0 : (60 - rot);
+
+        printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
+        printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
+        printf("first_second: %d\n", first_sec);
         printf("\nsignature:\n");
         printf("  period: %llu\n", (unsigned long long)params->sig_period);
         printf("  value: %llu\n", (unsigned long long)sig_value);
+        return 0;
     }
 
-    /* Auto-detect signature period if not specified */
-    if (params->sig_period == 0) {
-        uint64_t detected = detect_signature_period(masks, 60);
-        if (detected > 0) {
-            printf("\nauto-detected signature period: %llu\n",
-                   (unsigned long long)detected);
-            printf("  sig[%llu] = %llu\n",
-                   (unsigned long long)detected,
-                   (unsigned long long)(elapsed_t % detected));
+    /* Auto-detect P: limit based on available verification windows
+     *
+     * With M minutes, false positive rate for one P = (1/P)^(M-1)
+     * We test ~0.27*max_P candidates (coprime with 60 fraction)
+     * Total FP rate ≈ 0.27 * sum_{P=7}^{max_P} (1/P)^(M-1)
+     *
+     * Conservative limits for ~99% overall confidence:
+     * M=2: max_P ≈ 50 (sum of 1/P for P=7..50 ≈ 2, times 0.27 ≈ 0.5, risky)
+     * M=3: max_P ≈ 1000 (sum of 1/P² ≈ 0.15)
+     * M=4+: max_P very large (sum of 1/P³ converges fast)
+     */
+    uint64_t max_P;
+    if (num_minutes <= 1) {
+        fprintf(stderr, "Warning: Only 1 minute - cannot verify, trying small P\n");
+        max_P = 13;  /* Only smallest coprimes: 7, 11, 13 */
+    } else if (num_minutes == 2) {
+        max_P = 50;  /* Conservative for 2 windows */
+    } else if (num_minutes == 3) {
+        max_P = 1000;
+    } else if (num_minutes == 4) {
+        max_P = 10000;
+    } else {
+        max_P = 100000;  /* 5+ minutes: very high confidence */
+    }
+
+    fprintf(stderr, "Auto-detecting signature period (max P=%llu)...\n",
+            (unsigned long long)max_P);
+
+    uint64_t best_P = 0;
+    uint64_t best_t = 0, best_sig = 0;
+
+    for (uint64_t P = 7; P <= max_P; P++) {
+        if (!is_coprime_60(P)) continue;
+
+        uint64_t test_t, test_sig;
+        if (num_minutes >= 2) {
+            /* Verify across all available windows */
+            if (!verify_period_full(masks, total, P, &test_t, &test_sig)) continue;
+        } else {
+            /* Single minute - just try reconstruction */
+            clock_params_t test_params;
+            clock_params_init(&test_params);
+            test_params.sig_period = P;
+            int rot = inverse_time(masks, &test_params, &test_t, &test_sig);
+            if (rot < 0) continue;
+        }
+
+        best_P = P;
+        best_t = test_t;
+        best_sig = test_sig;
+        break;  /* First verified P is correct */
+    }
+
+    if (best_P > 0) {
+        int first_sec = (int)(best_t % 60);
+        printf("elapsed_seconds: %llu\n", (unsigned long long)best_t);
+        printf("minute: %llu\n", (unsigned long long)(best_t / 60));
+        printf("first_second: %d\n", first_sec);
+        printf("\nauto-detected signature:\n");
+        printf("  period: %llu\n", (unsigned long long)best_P);
+        printf("  value: %llu\n", (unsigned long long)best_sig);
+        printf("  confidence: %d minutes verified\n", num_minutes);
+    } else {
+        /* No signature detected, try original mode */
+        clock_params_t no_sig;
+        clock_params_init(&no_sig);
+        no_sig.sig_period = 0;
+
+        uint64_t elapsed_t, sig_value;
+        int rot = inverse_time(masks, &no_sig, &elapsed_t, &sig_value);
+        if (rot >= 0) {
+            int first_sec = (rot == 0) ? 0 : (60 - rot);
+            printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
+            printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
+            printf("first_second: %d\n", first_sec);
+            printf("\n(no signature detected, or P > %llu)\n",
+                   (unsigned long long)max_P);
+        } else {
+            fprintf(stderr, "Error: Could not reconstruct\n");
+            return 1;
         }
     }
 
