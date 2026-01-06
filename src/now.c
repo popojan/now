@@ -162,6 +162,9 @@ static int cell_idx(int cell) {
     return 0;
 }
 
+/* Store timestamp found while parsing (for when it's mixed with frames) */
+static char found_timestamp[64] = {0};
+
 /* Parse a single frame, auto-detecting display mode */
 static int parse_frame(FILE *f, uint8_t *mask_out) {
     char line[256];
@@ -169,9 +172,13 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
     int half_width_mode = 0;
     int wide_mode = 0;
 
-    /* Skip until we find a top border line */
+    /* Skip until we find a top border line (top-left corner) */
     while (fgets(line, sizeof(line), f)) {
-        if (line[0] == '.' || line[0] == '\xe2' || strchr(line, '-')) break;
+        if (is_top_left_corner(line)) break;
+        /* Check if this looks like a timestamp (YYYY-MM-DD) */
+        if (line[0] >= '1' && line[0] <= '2' && line[4] == '-') {
+            strncpy(found_timestamp, line, sizeof(found_timestamp) - 1);
+        }
         if (feof(f)) return -1;
     }
     if (feof(f)) return -1;
@@ -186,11 +193,9 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
 
     while (num_content_lines < 10 && fgets(line, sizeof(line), f)) {
         if (line[0] == '\n' || line[0] == '\r') continue;
-        unsigned char c0 = (unsigned char)line[0];
-        unsigned char c1 = (unsigned char)line[1];
-        unsigned char c2 = (unsigned char)line[2];
-        if (c0 == '.' || c0 == '\'') break;
-        if (c0 == 0xe2 && c1 == 0x94 && (c2 == 0x8c || c2 == 0x94 || c2 == 0x98)) break;
+        /* Stop at bottom border or next frame's top border */
+        if (is_bottom_border_start(line) || is_top_left_corner(line)) break;
+        /* Skip horizontal separator lines (contain dashes but no fill chars) */
         if (strchr(line, '-') && !strchr(line, '#') && !strchr(line, '@') &&
             !strchr(line, '%') && !strstr(line, "\xe2\x96")) continue;
         strncpy(content_lines[num_content_lines], line, 255);
@@ -327,11 +332,16 @@ static int run_inverse(clock_params_t *params) {
     int total = 0;
     int align_start = -1;  /* First frame at second 0 */
     int need_aligned = (params->sig_period == 0) ? 120 : 60;  /* 2 min for auto, 1 for known P */
+    time_t end_timestamp = 0;
 
     fprintf(stderr, "Reading frames from stdin...\n");
     while (total < 600) {
         uint8_t m;
-        if (parse_frame(stdin, &m) < 0) break;
+        int ret = parse_frame(stdin, &m);
+        if (ret < 0) {
+            if (feof(stdin)) break;  /* End of input */
+            continue;  /* Discard truncated frame, try next */
+        }
         masks[total++] = m;
         int sum = mask_to_sum(m) % 60;
         fprintf(stderr, "\rFrame %d: sum=%d  ", total, sum);
@@ -349,6 +359,23 @@ static int run_inverse(clock_params_t *params) {
     }
     fprintf(stderr, "\n");
 
+    /* Try to read termination timestamp from remaining input */
+    char line[256];
+    while (fgets(line, sizeof(line), stdin)) {
+        struct tm tm = {0};
+        int y, m, d, H, M, S;
+        if (sscanf(line, "%d-%d-%dT%d:%d:%d", &y, &m, &d, &H, &M, &S) == 6) {
+            tm.tm_year = y - 1900; tm.tm_mon = m - 1; tm.tm_mday = d;
+            tm.tm_hour = H; tm.tm_min = M; tm.tm_sec = S;
+#ifdef _WIN32
+            end_timestamp = _mkgmtime(&tm);
+#else
+            end_timestamp = timegm(&tm);
+#endif
+            break;
+        }
+    }
+
     if (total < 60) {
         fprintf(stderr, "Error: Need at least 60 frames, got %d\n", total);
         return 1;
@@ -357,32 +384,21 @@ static int run_inverse(clock_params_t *params) {
     int num_minutes = total / 60;
     fprintf(stderr, "Have %d frames (%d complete minutes)\n", total, num_minutes);
 
+    uint64_t elapsed_t = 0;
+    uint64_t sig_P = 0, sig_N0 = 0, sig_Nera = 0;
+
     /* If P specified, just decode */
     if (params->sig_period > 0) {
-        uint64_t elapsed_t, sig_value;
+        uint64_t sig_value;
         int rot = inverse_time(masks, params, &elapsed_t, &sig_value);
         if (rot < 0) {
             fprintf(stderr, "Error: Could not reconstruct\n");
             return 1;
         }
-        int first_sec = (rot == 0) ? 0 : (60 - rot);
-
-        printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
-        printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
-        printf("first_second: %d\n", first_sec);
-        printf("\nsignature:\n");
-        printf("  period: %llu\n", (unsigned long long)params->sig_period);
-        printf("  N_0: %llu\n", (unsigned long long)params->sig_value);
-        /* Compute era from decoded signature value */
-        uint64_t N0 = params->sig_value;
-        uint64_t P = params->sig_period;
-        uint64_t N_era = sig_value;
-        uint64_t era = (N_era >= N0) ? (N_era - N0) : (P - N0 + N_era);
-        printf("  era: %llu\n", (unsigned long long)era);
-        if (era > 0) {
-            printf("  N_era: %llu\n", (unsigned long long)N_era);
-        }
-        return 0;
+        sig_P = params->sig_period;
+        sig_N0 = params->sig_value;
+        sig_Nera = sig_value;
+        goto output;
     }
 
     /* Fast P detection using k_combined differences between windows.
@@ -461,23 +477,11 @@ static int run_inverse(clock_params_t *params) {
 
 
     if (best_P > 0) {
-        int first_sec = (int)(best_t % 60);
-        printf("elapsed_seconds: %llu\n", (unsigned long long)best_t);
-        printf("minute: %llu\n", (unsigned long long)(best_t / 60));
-        printf("first_second: %d\n", first_sec);
-        if (best_P == 1) {
-            printf("\n(no signature encoding detected)\n");
-        } else {
-            printf("\nauto-detected signature:\n");
-            printf("  period: %llu\n", (unsigned long long)best_P);
-            uint64_t N0 = params->sig_value;
-            uint64_t N_era = best_sig;
-            uint64_t era = (N_era >= N0) ? (N_era - N0) : (best_P - N0 + N_era);
-            printf("  N_0: %llu\n", (unsigned long long)N0);
-            printf("  era: %llu\n", (unsigned long long)era);
-            if (era > 0) {
-                printf("  N_era: %llu\n", (unsigned long long)N_era);
-            }
+        elapsed_t = best_t;
+        if (best_P > 1) {
+            sig_P = best_P;
+            sig_N0 = params->sig_value;
+            sig_Nera = best_sig;
         }
     } else {
         /* No signature detected, try original mode */
@@ -485,18 +489,39 @@ static int run_inverse(clock_params_t *params) {
         clock_params_init(&no_sig);
         no_sig.sig_period = 0;
 
-        uint64_t elapsed_t, sig_value;
+        uint64_t sig_value;
         int rot = inverse_time(masks, &no_sig, &elapsed_t, &sig_value);
-        if (rot >= 0) {
-            int first_sec = (rot == 0) ? 0 : (60 - rot);
-            printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
-            printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
-            printf("first_second: %d\n", first_sec);
-            printf("\n(no signature detected)\n");
-        } else {
+        if (rot < 0) {
             fprintf(stderr, "Error: Could not reconstruct\n");
             return 1;
         }
+    }
+
+output:;
+    int first_sec = (int)(elapsed_t % 60);
+    printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
+    printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
+    printf("first_second: %d\n", first_sec);
+
+    if (end_timestamp > 0) {
+        time_t origin = end_timestamp - (time_t)elapsed_t - (total - 1);
+        struct tm *utc = gmtime(&origin);
+        printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
+               utc->tm_year + 1900, utc->tm_mon + 1, utc->tm_mday,
+               utc->tm_hour, utc->tm_min, utc->tm_sec);
+    }
+
+    if (sig_P > 0) {
+        printf("\nsignature:\n");
+        printf("  period: %llu\n", (unsigned long long)sig_P);
+        printf("  N_0: %llu\n", (unsigned long long)sig_N0);
+        uint64_t era = (sig_Nera >= sig_N0) ? (sig_Nera - sig_N0) : (sig_P - sig_N0 + sig_Nera);
+        printf("  era: %llu\n", (unsigned long long)era);
+        if (era > 0) {
+            printf("  N_era: %llu\n", (unsigned long long)sig_Nera);
+        }
+    } else {
+        printf("\n(no signature detected)\n");
     }
 
     return 0;
@@ -587,6 +612,7 @@ int main(int argc, char **argv) {
     signal(SIGINT, handle_signal);
 #ifndef _WIN32
     signal(SIGTERM, handle_signal);
+    signal(SIGPIPE, handle_signal);  /* Stop loop but print timestamp */
 #endif
 
     /* Calculate start time */

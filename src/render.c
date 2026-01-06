@@ -212,3 +212,36 @@ const char **render_get_presets(void) {
     preset_names[i] = NULL;
     return preset_names;
 }
+
+/* Border detection for inverse parsing */
+
+int is_top_left_corner(const char *s) {
+    /* ASCII: '.' */
+    if (s[0] == '.') return 1;
+    /* Unicode: ┌ = E2 94 8C */
+    if ((unsigned char)s[0] == 0xe2 &&
+        (unsigned char)s[1] == 0x94 &&
+        (unsigned char)s[2] == 0x8c) return 1;
+    return 0;
+}
+
+int is_bottom_border_start(const char *s) {
+    /* ASCII: '\'' */
+    if (s[0] == '\'') return 1;
+    /* Unicode: └ = E2 94 94, ├ = E2 94 9C, ┌ = E2 94 8C */
+    if ((unsigned char)s[0] == 0xe2 && (unsigned char)s[1] == 0x94) {
+        unsigned char c2 = (unsigned char)s[2];
+        if (c2 == 0x94 || c2 == 0x9c || c2 == 0x8c || c2 == 0x98) return 1;
+    }
+    return 0;
+}
+
+int is_vertical_border(const char *s) {
+    /* ASCII: '|' */
+    if (s[0] == '|') return 1;
+    /* Unicode: │ = E2 94 82 */
+    if ((unsigned char)s[0] == 0xe2 &&
+        (unsigned char)s[1] == 0x94 &&
+        (unsigned char)s[2] == 0x82) return 1;
+    return 0;
+}
