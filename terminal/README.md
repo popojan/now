@@ -49,7 +49,7 @@ Time:
 
 Signatures:
   -P VALUE    Clock signature (auto-detected from recordings)
-              Must be coprime with 60 (no factors 2, 3, or 5)
+              Coprime with 60 recommended (no factors 2, 3, 5) but any value works
   -N SALT     Optional salt for era cycling (default: 0)
 ```
 

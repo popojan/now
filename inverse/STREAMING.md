@@ -195,7 +195,7 @@ N_era = k_combined % P
 4. **Web app sync**: Add `?P=7&N=3` URL params to web version
 
 ### Implementation Notes
-- Requires 2 complete minutes (120 frames) for auto-detection
-- With known P (user setting), only 60 frames needed
+- Requires 2 complete minutes (120 frames) for auto-detection of P
+- With known P (user setting), only 60 frames needed to decode N
 - Era cycling ensures full 88B-year period preserved regardless of P
-- Coprime-60 constraint ensures N doesn't correlate with visual seconds
+- Coprime-60 recommended (better entropy) but not required - any P works
