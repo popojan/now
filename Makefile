@@ -24,11 +24,11 @@ clean:
 
 # Test: round-trip (generate -> inverse -> verify)
 test-roundtrip: $(TARGET)
-	@echo "=== Round-trip test (original period) ==="
-	$(TARGET) -n 60 -s | $(TARGET) -i
+	@echo "=== Round-trip test (P auto-detect) ==="
+	$(TARGET) -P 7 -n 180 -s | $(TARGET) -i
 	@echo ""
-	@echo "=== Round-trip test (custom period 60) ==="
-	$(TARGET) -P 60 -n 60 -s | $(TARGET) -P 60 -i
+	@echo "=== Round-trip test (P specified) ==="
+	$(TARGET) -P 60 -n 120 -s | $(TARGET) -P 60 -i
 
 # Test: signatures display
 test-signatures: $(TARGET)
