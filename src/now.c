@@ -600,8 +600,10 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-i") == 0) inverse = 1;
         else if (strcmp(argv[i], "-p") == 0 && i+1 < argc)
             render_apply_preset(&render, argv[++i]);
-        else if (strcmp(argv[i], "-f") == 0 && i+1 < argc)
+        else if (strcmp(argv[i], "-f") == 0 && i+1 < argc) {
             render.fills = argv[++i];
+            render.wide_fills = 0;  /* Custom fills are doubled unless -w */
+        }
         else if (strcmp(argv[i], "-o") == 0 && i+1 < argc) {
             if (strcmp(argv[i+1], "now") == 0) {
                 /* Floor to start of current minute */
