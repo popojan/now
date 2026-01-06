@@ -1,10 +1,8 @@
-# Now
+# Now Clock
 
-A clock cycling through 60 states per minute, each a subset sum of {1, 2, 4, 6, 12, 15, 20}.
+Never repeats for 88 billion years. Encodes recoverable origin and unique signature in every minute.
 
-These weights cover [Farey sequence](https://en.wikipedia.org/wiki/Farey_sequence) $F_6$ exactly.
-
-Period: $2^{30} \times 3^{16}$ min ≈ 88 billion years
+A clock cycling through 60 states per minute, each a subset sum of {1, 2, 4, 6, 12, 15, 20}. These weights cover [Farey sequence](https://en.wikipedia.org/wiki/Farey_sequence) $F_6$ exactly. Period: $2^{30} \times 3^{16}$ minutes.
 
 ## How It Works
 
