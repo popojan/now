@@ -19,6 +19,12 @@
 #include <time.h>
 
 #ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <sys/select.h>
+#endif
+
+#ifdef _WIN32
 #include <windows.h>
 #define SLEEP_MS(ms) Sleep(ms)
 #define IS_TTY() _isatty(_fileno(stdout))
@@ -69,7 +75,7 @@ static void usage(const char *prog) {
     printf("  (default)   Live clock\n");
     printf("  -s          Simulate (fast, no delay)\n");
     printf("  -l          In-place update (TTY only)\n");
-    printf("  -i          Inverse: read frames, output elapsed time\n");
+    printf("  -i          Inverse: read frames, detect P/N, output origin\n");
     printf("  -n N        Output N frames then exit\n\n");
     printf("Display:\n");
     printf("  -a          ASCII borders\n");
@@ -327,7 +333,13 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
     return 1;
 }
 
-static int run_inverse(clock_params_t *params) {
+/*
+ * Inverse modes:
+ *   1. No -N, no -o: Assume era=0, N_0 = decoded N_era (simple origin recovery)
+ *   2. -o ORIGIN:    Verify era=0 against approximate origin, decode N_0
+ *   3. -N given:     Use explicit N_0, calculate era from decoded N_era
+ */
+static int run_inverse(clock_params_t *params, int n_specified, time_t approx_origin) {
     uint8_t masks[600];  /* Up to 10 minutes */
     int total = 0;
     int align_start = -1;  /* First frame at second 0 */
@@ -359,22 +371,12 @@ static int run_inverse(clock_params_t *params) {
     }
     fprintf(stderr, "\n");
 
-    /* Try to read termination timestamp from remaining input */
-    char line[256];
-    while (fgets(line, sizeof(line), stdin)) {
-        struct tm tm = {0};
-        int y, m, d, H, M, S;
-        if (sscanf(line, "%d-%d-%dT%d:%d:%d", &y, &m, &d, &H, &M, &S) == 6) {
-            tm.tm_year = y - 1900; tm.tm_mon = m - 1; tm.tm_mday = d;
-            tm.tm_hour = H; tm.tm_min = M; tm.tm_sec = S;
-#ifdef _WIN32
-            end_timestamp = _mkgmtime(&tm);
-#else
-            end_timestamp = timegm(&tm);
-#endif
-            break;
-        }
-    }
+    /* Close stdin to signal encoder to stop (triggers SIGPIPE) */
+    fclose(stdin);
+
+    /* Origin is computed from current time, not embedded timestamp.
+     * The clock pattern encodes elapsed time; we know "now" from the system. */
+    int total_for_origin = total;
 
     if (total < 60) {
         fprintf(stderr, "Error: Need at least 60 frames, got %d\n", total);
@@ -387,17 +389,30 @@ static int run_inverse(clock_params_t *params) {
     uint64_t elapsed_t = 0;
     uint64_t sig_P = 0, sig_N0 = 0, sig_Nera = 0;
 
-    /* If P specified, just decode */
+    /* Find alignment offset (first frame at second 0) */
+    int global_align_offset = 0;
+    for (int i = 0; i < 60 && i < total; i++) {
+        if (mask_to_sum(masks[i]) % 60 == 0) {
+            global_align_offset = i;
+            break;
+        }
+    }
+
+    /* If P specified, decode N_era and go to output */
     if (params->sig_period > 0) {
-        uint64_t sig_value;
-        int rot = inverse_time(masks, params, &elapsed_t, &sig_value);
+        /* Use aligned frames for reconstruction */
+        clock_params_t raw_params;
+        clock_params_init(&raw_params);
+        raw_params.sig_period = 1;
+        uint64_t raw_t, dummy;
+        int rot = inverse_time(masks + global_align_offset, &raw_params, &raw_t, &dummy);
         if (rot < 0) {
             fprintf(stderr, "Error: Could not reconstruct\n");
             return 1;
         }
+        uint64_t k_combined = raw_t / 60;
         sig_P = params->sig_period;
-        sig_N0 = params->sig_value;
-        sig_Nera = sig_value;
+        sig_Nera = k_combined % sig_P;
         goto output;
     }
 
@@ -406,20 +421,10 @@ static int run_inverse(clock_params_t *params) {
      * For consecutive windows: delta = k_combined[w+1] - k_combined[w] = P
      */
 
-    uint64_t best_P = 0;
-    uint64_t best_t = 0, best_sig = 0;
+    uint64_t best_P = 0, best_sig = 0;
 
     if (num_minutes >= 2) {
-        /* Find first aligned window (starting at second 0) to avoid slow crossing case */
-        int align_offset = 0;
-        for (int i = 0; i < 60 && i < total; i++) {
-            if (mask_to_sum(masks[i]) % 60 == 0) {
-                align_offset = i;
-                break;
-            }
-        }
-
-        int aligned_frames = total - align_offset;
+        int aligned_frames = total - global_align_offset;
         int aligned_minutes = aligned_frames / 60;
 
         if (aligned_minutes < 2) {
@@ -436,7 +441,7 @@ static int run_inverse(clock_params_t *params) {
 
         for (int w = 0; w < aligned_minutes && w < 10 && valid; w++) {
             uint64_t t, sig;
-            int rot = inverse_time(masks + align_offset + w * 60, &base_params, &t, &sig);
+            int rot = inverse_time(masks + global_align_offset + w * 60, &base_params, &t, &sig);
             if (rot < 0) { valid = 0; break; }
             k_combined[w] = t / 60;  /* t = k * 60 when P=1, so k = t/60 */
         }
@@ -463,11 +468,11 @@ static int run_inverse(clock_params_t *params) {
 
                 /* Verify with full verification, using N_0 (default 0) */
                 uint64_t test_t, test_sig;
-                if (verify_period_full(masks + align_offset, aligned_frames, delta,
+                if (verify_period_full(masks + global_align_offset, aligned_frames, delta,
                                        (int64_t)params->sig_value, &test_t, &test_sig)) {
                     best_P = delta;
-                    best_t = test_t;
                     best_sig = test_sig;
+                    (void)test_t;  /* unused, t computed later from aligned frame */
                 }
             }
         }
@@ -481,12 +486,8 @@ static int run_inverse(clock_params_t *params) {
 
 
     if (best_P > 0) {
-        elapsed_t = best_t;
-        if (best_P > 1) {
-            sig_P = best_P;
-            sig_N0 = params->sig_value;
-            sig_Nera = best_sig;
-        }
+        sig_P = best_P;
+        sig_Nera = best_sig;
     } else {
         /* No signature detected, try original mode */
         clock_params_t no_sig;
@@ -499,39 +500,111 @@ static int run_inverse(clock_params_t *params) {
             fprintf(stderr, "Error: Could not reconstruct\n");
             return 1;
         }
+        goto output_no_sig;
     }
 
 output:;
-    int first_sec = (int)(elapsed_t % 60);
-    printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
-    printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
-    printf("first_second: %d\n", first_sec);
+    /*
+     * We have sig_P and sig_Nera. Now interpret based on mode:
+     *   Mode 1 (no -N, no -o): Assume era=0, N_0 = N_era
+     *   Mode 2 (-o given):     Verify era=0 against origin, N_0 = N_era
+     *   Mode 3 (-N given):     Use explicit N_0, calculate era
+     */
+    {
+        /* Get k_combined by calling inverse_time with P=1
+         * Use aligned frames (starting at second 0) to avoid minute-crossing ambiguity */
+        clock_params_t raw_params;
+        clock_params_init(&raw_params);
+        raw_params.sig_period = 1;
+        uint64_t raw_t, dummy;
+        int rot = inverse_time(masks + global_align_offset, &raw_params, &raw_t, &dummy);
+        if (rot < 0) {
+            fprintf(stderr, "Error: Could not get k_combined\n");
+            return 1;
+        }
+        uint64_t k_combined = raw_t / 60;
 
-    if (end_timestamp > 0) {
-        time_t origin = end_timestamp - (time_t)elapsed_t - (total - 1);
+        /* Compute local_minute from aligned frame (within era) */
+        uint64_t local_minute = k_combined / sig_P;
+
+        /* first_sec is the second of frame 0 (before alignment) */
+        int first_sec = (60 - global_align_offset) % 60;
+        uint64_t era = 0;
+
+        if (n_specified) {
+            /* Mode 3: Use explicit N_0, calculate era */
+            sig_N0 = params->sig_value;
+            era = (sig_Nera >= sig_N0) ? (sig_Nera - sig_N0) : (sig_P - sig_N0 + sig_Nera);
+            uint64_t max_minute_per_era = PERIOD_ORIGINAL_MINUTES / sig_P;
+            elapsed_t = (era * max_minute_per_era + local_minute) * 60 - global_align_offset;
+        } else if (approx_origin > 0 && end_timestamp > 0) {
+            /* Mode 2: Verify era=0 against approximate origin */
+            sig_N0 = sig_Nera;  /* Assume era=0 */
+            /* Aligned frame is at local_minute * 60, first frame is align_offset earlier */
+            elapsed_t = local_minute * 60 - global_align_offset;
+
+            /* Verify: does computed origin match approximate origin? */
+            time_t computed_origin = end_timestamp - (time_t)elapsed_t - (total_for_origin - 1);
+            int64_t diff = (int64_t)(computed_origin - approx_origin);
+            if (diff < 0) diff = -diff;
+
+            uint64_t max_minute_per_era = PERIOD_ORIGINAL_MINUTES / sig_P;
+            int64_t era_seconds = (int64_t)max_minute_per_era * 60;
+
+            if (diff < era_seconds / 2) {
+                fprintf(stderr, "Verified: origin matches (era=0, diff=%lld sec)\n", (long long)diff);
+            } else {
+                fprintf(stderr, "Warning: origin differs by %lld sec (era may be non-zero)\n", (long long)diff);
+            }
+        } else {
+            /* Mode 1: Assume era=0, N_0 = N_era */
+            sig_N0 = sig_Nera;
+            elapsed_t = local_minute * 60 - global_align_offset;
+        }
+
+        printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
+        printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
+        printf("first_second: %d\n", first_sec);
+
+        /* Compute origin: use end_timestamp if available, else current time */
+        time_t ref_time = (end_timestamp > 0) ? end_timestamp : time(NULL);
+        time_t origin = ref_time - (time_t)elapsed_t;
         struct tm *utc = gmtime(&origin);
         if (utc) {
             printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
                    utc->tm_year + 1900, utc->tm_mon + 1, utc->tm_mday,
                    utc->tm_hour, utc->tm_min, utc->tm_sec);
-        } else {
-            printf("\norigin: (invalid timestamp)\n");
         }
-    }
 
-    if (sig_P > 0) {
         printf("\nsignature:\n");
-        printf("  period: %llu\n", (unsigned long long)sig_P);
-        printf("  N_0: %llu\n", (unsigned long long)sig_N0);
-        uint64_t era = (sig_Nera >= sig_N0) ? (sig_Nera - sig_N0) : (sig_P - sig_N0 + sig_Nera);
-        printf("  era: %llu\n", (unsigned long long)era);
+        printf("  P: %llu\n", (unsigned long long)sig_P);
+        printf("  N: %llu\n", (unsigned long long)sig_N0);
         if (era > 0) {
+            printf("  era: %llu\n", (unsigned long long)era);
             printf("  N_era: %llu\n", (unsigned long long)sig_Nera);
         }
-    } else {
+    }
+    return 0;
+
+output_no_sig:;
+    {
+        int first_sec = (int)(elapsed_t % 60);
+        printf("elapsed_seconds: %llu\n", (unsigned long long)elapsed_t);
+        printf("minute: %llu\n", (unsigned long long)(elapsed_t / 60));
+        printf("first_second: %d\n", first_sec);
+
+        /* Compute origin: use end_timestamp if available, else current time */
+        time_t ref_time = (end_timestamp > 0) ? end_timestamp : time(NULL);
+        time_t origin = ref_time - (time_t)elapsed_t;
+        struct tm *utc = gmtime(&origin);
+        if (utc) {
+            printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
+                   utc->tm_year + 1900, utc->tm_mon + 1, utc->tm_mday,
+                   utc->tm_hour, utc->tm_min, utc->tm_sec);
+        }
+
         printf("\n(no signature detected)\n");
     }
-
     return 0;
 }
 
@@ -546,6 +619,7 @@ int main(int argc, char **argv) {
     int inverse = 0, simulate = 0, inplace = 0;
     int64_t num_frames = -1, start_t = -1;
     time_t origin = 0;
+    int n_specified = 0;  /* Track if -N was explicitly provided */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -583,6 +657,7 @@ int main(int argc, char **argv) {
         }
         else if (strcmp(argv[i], "-N") == 0 && i+1 < argc) {
             params.sig_value = strtoull(argv[++i], NULL, 10);
+            n_specified = 1;
         }
     }
 
@@ -595,7 +670,13 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (inverse) return run_inverse(&params);
+    /* In inverse mode, default to -o now if no -P, -N, or -o given */
+    if (inverse) {
+        if (origin == 0 && params.sig_period == 0 && !n_specified) {
+            origin = (time(NULL) / 60) * 60;  /* Floor to minute */
+        }
+        return run_inverse(&params, n_specified, origin);
+    }
 
     /* Show era info when using signatures */
     if (params.sig_period > 1) {
