@@ -70,6 +70,9 @@ static void usage(const char *prog) {
     printf("  -s          Simulate (fast, no delay)\n");
     printf("  -l          In-place update (TTY only)\n");
     printf("  -i          Inverse: read frames, detect P/N, output origin\n");
+    printf("  -b          Bits: output cell mask per second (7 bits, LSB=cell 1)\n");
+    printf("  -d          Decimal: output cell mask as number (0-127)\n");
+    printf("  -r          Raw: output binary byte per second (bit 7 reserved)\n");
     printf("  -n N        Output N frames then exit\n\n");
     printf("Display:\n");
     printf("  -a          ASCII borders\n");
@@ -159,6 +162,58 @@ static int cell_idx(int cell) {
         case 1: return 1; case 2: return 2; case 4: return 3;
         case 6: return 4; case 12: return 5; case 15: return 6; case 20: return 7;
     }
+    return 0;
+}
+
+/* Parse a bits line (7 binary digits) */
+static int parse_bits_line(FILE *f, uint8_t *mask_out) {
+    char line[32];
+    if (!fgets(line, sizeof(line), f)) return -1;
+    if (strlen(line) < 7) return -1;
+
+    /* Verify format: 7 binary digits */
+    for (int i = 0; i < 7; i++) {
+        if (line[i] != '0' && line[i] != '1') return -1;
+    }
+
+    /* Parse: positions are 20,15,12,6,4,2,1 (LSB=cell 1 on right) */
+    *mask_out = ((line[0] == '1') ? 0x40 : 0) |  /* cell 20 */
+                ((line[1] == '1') ? 0x20 : 0) |  /* cell 15 */
+                ((line[2] == '1') ? 0x10 : 0) |  /* cell 12 */
+                ((line[3] == '1') ? 0x08 : 0) |  /* cell 6 */
+                ((line[4] == '1') ? 0x04 : 0) |  /* cell 4 */
+                ((line[5] == '1') ? 0x02 : 0) |  /* cell 2 */
+                ((line[6] == '1') ? 0x01 : 0);   /* cell 1 */
+    return 0;
+}
+
+/* Parse a decimal line (number 0-127) */
+static int parse_decimal_line(FILE *f, uint8_t *mask_out) {
+    char line[32];
+    if (!fgets(line, sizeof(line), f)) return -1;
+
+    /* Skip leading whitespace */
+    char *p = line;
+    while (*p == ' ') p++;
+
+    /* Verify format: digits only */
+    int len = 0;
+    while (p[len] >= '0' && p[len] <= '9') len++;
+    if (len == 0 || len > 3) return -1;
+
+    int val = atoi(p);
+    if (val < 0 || val > 127) return -1;
+
+    *mask_out = (uint8_t)val;
+    return 0;
+}
+
+/* Parse a raw byte (0-127) */
+static int parse_raw_byte(FILE *f, uint8_t *mask_out) {
+    int c = getc(f);
+    if (c == EOF) return -1;
+    if (c > 127) return -1;  /* bit 7 must be 0 */
+    *mask_out = (uint8_t)c;
     return 0;
 }
 
@@ -335,11 +390,40 @@ static int run_inverse(clock_params_t *params, int n_specified, int simulate) {
     int align_start = -1;  /* First frame at second 0 */
     int need_aligned = (params->sig_period == 0) ? 120 : 60;  /* 2 min for auto, 1 for known P */
     time_t start_time = time(NULL);  /* For live mode correction */
+    int input_format = -1;  /* -1 = unknown, 0 = visual, 1 = bits, 2 = decimal */
 
     fprintf(stderr, "Reading frames from stdin...\n");
     while (total < 600) {
         uint8_t m;
-        int ret = parse_frame(stdin, &m);
+        int ret;
+
+        /* Auto-detect format from first few chars */
+        if (input_format < 0) {
+            int c = getc(stdin);
+            if (c == EOF) break;
+            int c2 = getc(stdin);
+            if (c2 != EOF) ungetc(c2, stdin);
+            ungetc(c, stdin);
+
+            /* Raw: second byte is not newline and first byte is 0-127 */
+            if (c <= 127 && c2 != '\n' && c2 != '\r' && c2 != EOF &&
+                !(c >= '0' && c <= '9') && c != '|' && c != '-') {
+                input_format = 3;  /* raw binary */
+            } else if ((c == '0' || c == '1') && (c2 == '0' || c2 == '1')) {
+                input_format = 1;  /* bits: starts with two binary digits */
+            } else if (c >= '0' && c <= '9') {
+                input_format = 2;  /* decimal: starts with digit */
+            } else {
+                input_format = 0;  /* visual */
+            }
+            const char *fmt_name[] = {"visual", "bits", "decimal", "raw"};
+            fprintf(stderr, "Detected %s format\n", fmt_name[input_format]);
+        }
+
+        if (input_format == 1) ret = parse_bits_line(stdin, &m);
+        else if (input_format == 2) ret = parse_decimal_line(stdin, &m);
+        else if (input_format == 3) ret = parse_raw_byte(stdin, &m);
+        else ret = parse_frame(stdin, &m);
         if (ret < 0) {
             if (feof(stdin)) break;  /* End of input */
             continue;  /* Discard truncated frame, try next */
@@ -583,7 +667,7 @@ int main(int argc, char **argv) {
     clock_params_init(&params);
     render_opts_init(&render);
 
-    int inverse = 0, simulate = 0, inplace = 0;
+    int inverse = 0, simulate = 0, inplace = 0, bits_mode = 0, decimal_mode = 0, raw_mode = 0;
     int64_t num_frames = -1, start_t = -1;
     time_t origin = 0;
     int n_specified = 0;  /* Track if -N was explicitly provided */
@@ -598,6 +682,9 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-l") == 0) inplace = 1;
         else if (strcmp(argv[i], "-s") == 0) simulate = 1;
         else if (strcmp(argv[i], "-i") == 0) inverse = 1;
+        else if (strcmp(argv[i], "-b") == 0) bits_mode = 1;
+        else if (strcmp(argv[i], "-d") == 0) decimal_mode = 1;
+        else if (strcmp(argv[i], "-r") == 0) raw_mode = 1;
         else if (strcmp(argv[i], "-p") == 0 && i+1 < argc)
             render_apply_preset(&render, argv[++i]);
         else if (strcmp(argv[i], "-f") == 0 && i+1 < argc) {
@@ -719,11 +806,30 @@ int main(int argc, char **argv) {
         uint64_t t = (uint64_t)display_time;
         uint8_t mask = get_mask(t, &params);
 
-        if (inplace && frame > 0 && IS_TTY()) printf("\033[13A");
-
-        render_mask(mask, &render, stdout);
-
-        printf("\n");
+        if (bits_mode) {
+            /* Output 7 bits: positions are 20,15,12,6,4,2,1 (LSB=cell 1 on right) */
+            if (inplace && frame > 0 && IS_TTY()) printf("\r");
+            printf("%c%c%c%c%c%c%c",
+                   (mask & 0x40) ? '1' : '0',  /* cell 20 */
+                   (mask & 0x20) ? '1' : '0',  /* cell 15 */
+                   (mask & 0x10) ? '1' : '0',  /* cell 12 */
+                   (mask & 0x08) ? '1' : '0',  /* cell 6 */
+                   (mask & 0x04) ? '1' : '0',  /* cell 4 */
+                   (mask & 0x02) ? '1' : '0',  /* cell 2 */
+                   (mask & 0x01) ? '1' : '0'); /* cell 1 */
+            if (!inplace || !IS_TTY()) printf("\n");
+        } else if (decimal_mode) {
+            if (inplace && frame > 0 && IS_TTY()) printf("\r");
+            printf("%d", mask);
+            if (!inplace || !IS_TTY()) printf("\n");
+        } else if (raw_mode) {
+            putchar(mask);  /* Binary byte, bit 7 = 0 */
+            fflush(stdout);
+        } else {
+            if (inplace && frame > 0 && IS_TTY()) printf("\033[13A");
+            render_mask(mask, &render, stdout);
+            printf("\n");
+        }
         fflush(stdout);
         frame++;
 

@@ -36,7 +36,10 @@ bin/now -p emoji   # Emoji preset
 -w          Wide fills (for CJK/emoji)
 -l          In-place update (TTY only)
 -s          Simulate (fast, no delay)
--i          Inverse: read frames, detect signature, output origin
+-b          Bits: output cell mask as 7 binary digits (positions: 20,15,12,6,4,2,1)
+-d          Decimal: output cell mask as number (0-127)
+-r          Raw: output binary byte per second (bit 7 reserved for future use)
+-i          Inverse: read any format (visual, bits, decimal, raw), output origin
 ```
 
 ### Round-trip Test
