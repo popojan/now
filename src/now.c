@@ -36,6 +36,7 @@ static void enable_vt(void) {}
 #endif
 
 #include "core.h"
+#include "core8.h"
 #include "render.h"
 
 static volatile int running = 1;
@@ -74,6 +75,7 @@ static void usage(const char *prog) {
     printf("  -b          Bits: output cell mask per second (7 bits, LSB=cell 1)\n");
     printf("  -d          Decimal: output cell mask as number (0-127)\n");
     printf("  -r          Raw: output binary byte per second (bit 7 reserved)\n");
+    printf("  -8          8-bit mode: use 8 cells (1,2,4,6,12,15,20,30) for 99.8%% entropy\n");
     printf("  -n N        Output N frames then exit\n\n");
     printf("Display:\n");
     printf("  -a          ASCII borders\n");
@@ -170,21 +172,39 @@ static int cell_idx(int cell) {
 static int parse_bits_line(FILE *f, uint8_t *mask_out) {
     char line[32];
     if (!fgets(line, sizeof(line), f)) return -1;
-    if (strlen(line) < 7) return -1;
+    size_t len = strlen(line);
 
-    /* Verify format: 7 binary digits */
-    for (int i = 0; i < 7; i++) {
+    /* Support both 7-bit and 8-bit format */
+    int nbits = 0;
+    if (len >= 8 && line[7] >= '0' && line[7] <= '1') nbits = 8;
+    else if (len >= 7) nbits = 7;
+    else return -1;
+
+    /* Verify format: binary digits */
+    for (int i = 0; i < nbits; i++) {
         if (line[i] != '0' && line[i] != '1') return -1;
     }
 
-    /* Parse: positions are 20,15,12,6,4,2,1 (LSB=cell 1 on right) */
-    *mask_out = ((line[0] == '1') ? 0x40 : 0) |  /* cell 20 */
-                ((line[1] == '1') ? 0x20 : 0) |  /* cell 15 */
-                ((line[2] == '1') ? 0x10 : 0) |  /* cell 12 */
-                ((line[3] == '1') ? 0x08 : 0) |  /* cell 6 */
-                ((line[4] == '1') ? 0x04 : 0) |  /* cell 4 */
-                ((line[5] == '1') ? 0x02 : 0) |  /* cell 2 */
-                ((line[6] == '1') ? 0x01 : 0);   /* cell 1 */
+    if (nbits == 8) {
+        /* 8-bit: positions are 30,20,15,12,6,4,2,1 (MSB=cell 30 on left) */
+        *mask_out = ((line[0] == '1') ? 0x80 : 0) |  /* cell 30 */
+                    ((line[1] == '1') ? 0x40 : 0) |  /* cell 20 */
+                    ((line[2] == '1') ? 0x20 : 0) |  /* cell 15 */
+                    ((line[3] == '1') ? 0x10 : 0) |  /* cell 12 */
+                    ((line[4] == '1') ? 0x08 : 0) |  /* cell 6 */
+                    ((line[5] == '1') ? 0x04 : 0) |  /* cell 4 */
+                    ((line[6] == '1') ? 0x02 : 0) |  /* cell 2 */
+                    ((line[7] == '1') ? 0x01 : 0);   /* cell 1 */
+    } else {
+        /* 7-bit: positions are 20,15,12,6,4,2,1 (MSB=cell 20 on left) */
+        *mask_out = ((line[0] == '1') ? 0x40 : 0) |  /* cell 20 */
+                    ((line[1] == '1') ? 0x20 : 0) |  /* cell 15 */
+                    ((line[2] == '1') ? 0x10 : 0) |  /* cell 12 */
+                    ((line[3] == '1') ? 0x08 : 0) |  /* cell 6 */
+                    ((line[4] == '1') ? 0x04 : 0) |  /* cell 4 */
+                    ((line[5] == '1') ? 0x02 : 0) |  /* cell 2 */
+                    ((line[6] == '1') ? 0x01 : 0);   /* cell 1 */
+    }
     return 0;
 }
 
@@ -203,7 +223,7 @@ static int parse_decimal_line(FILE *f, uint8_t *mask_out) {
     if (len == 0 || len > 3) return -1;
 
     int val = atoi(p);
-    if (val < 0 || val > 127) return -1;
+    if (val < 0 || val > 255) return -1;  /* 8-bit mode uses 0-255 */
 
     *mask_out = (uint8_t)val;
     return 0;
@@ -213,7 +233,7 @@ static int parse_decimal_line(FILE *f, uint8_t *mask_out) {
 static int parse_raw_byte(FILE *f, uint8_t *mask_out) {
     int c = getc(f);
     if (c == EOF) return -1;
-    if (c > 127) return -1;  /* bit 7 must be 0 */
+    /* 8-bit mode uses all 256 values */
     *mask_out = (uint8_t)c;
     return 0;
 }
@@ -385,15 +405,20 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
  *   - Simulated (-s): origin = now - elapsed_t (frames are instant)
  *   - Live: origin = start_time - elapsed_t (accounts for real-time delay)
  */
-static int run_inverse(clock_params_t *params, int n_specified, int simulate, int error_correct, int forced_format) {
+static int run_inverse(clock_params_t *params, clock8_params_t *params8, int n_specified, int simulate, int error_correct, int forced_format, int mode8) {
     uint8_t masks[600];  /* Up to 10 minutes */
     frame_correction_t corrections[600];
     int total = 0;
     int align_start = -1;  /* First frame at second 0 */
-    int need_aligned = (params->sig_period == 0) ? 120 : 60;  /* 2 min for auto, 1 for known P */
+    /* For P auto-detection need 2 aligned minutes; check appropriate params struct */
+    int p_specified = mode8 ? !U128_EQ(params8->sig_period, U128_ZERO) : (params->sig_period != 0);
+    int need_aligned = p_specified ? 60 : 120;
     time_t start_time = time(NULL);  /* For live mode correction */
     int input_format = forced_format;  /* -1 = auto, 0 = visual, 1 = bits, 2 = decimal, 3 = raw */
 
+    if (mode8) {
+        fprintf(stderr, "8-bit mode: expecting decimal, bits, or raw format\n");
+    }
     fprintf(stderr, "Reading frames from stdin...\n");
     while (total < 600) {
         uint8_t m;
@@ -431,7 +456,7 @@ static int run_inverse(clock_params_t *params, int n_specified, int simulate, in
             continue;  /* Discard truncated frame, try next */
         }
         masks[total++] = m;
-        int sum = mask_to_sum(m) % 60;
+        int sum = mode8 ? mask8_to_sum(m) : (mask_to_sum(m) % 60);
         fprintf(stderr, "\rFrame %d: sum=%d  ", total, sum);
 
         /* Track first aligned position */
@@ -492,10 +517,107 @@ static int run_inverse(clock_params_t *params, int n_specified, int simulate, in
     /* Find alignment offset (first frame at second 0) */
     int global_align_offset = 0;
     for (int i = 0; i < 60 && i < total; i++) {
-        if (mask_to_sum(masks[i]) % 60 == 0) {
+        int sum = mode8 ? mask8_to_sum(masks[i]) : (mask_to_sum(masks[i]) % 60);
+        if (sum == 0) {
             global_align_offset = i;
             break;
         }
+    }
+
+    /* 8-bit mode: use inverse8_time with full 128-bit support */
+    if (mode8) {
+        int aligned_frames = total - global_align_offset;
+        int aligned_minutes = aligned_frames / 60;
+
+        /* P auto-detection: need at least 2 aligned minutes */
+        uint128_t detected_P = U128_ZERO;
+        uint128_t one = U128_FROM_U64(1);
+
+        if (U128_EQ(params8->sig_period, U128_ZERO) && aligned_minutes >= 2) {
+            /* Reconstruct k_combined for consecutive minutes */
+            uint128_t k0_t, k0_sig, k1_t, k1_sig;
+            clock8_params_t raw_params8;
+            clock8_params_init(&raw_params8);
+            raw_params8.sig_period = one;  /* P=1 means raw k_combined */
+
+            int rot0 = inverse8_time(masks + global_align_offset, &raw_params8, &k0_t, &k0_sig);
+            int rot1 = inverse8_time(masks + global_align_offset + 60, &raw_params8, &k1_t, &k1_sig);
+
+            if (rot0 >= 0 && rot1 >= 0 && U128_LT(k0_t, k1_t)) {
+                uint128_t k0 = U128_DIV(k0_t, 60);
+                uint128_t k1 = U128_DIV(k1_t, 60);
+                uint128_t delta = U128_SUB(k1, k0);
+                if (!U128_EQ(delta, U128_ZERO)) {
+                    detected_P = delta;
+                    char delta_str[50];
+                    u128_to_str(delta, delta_str, sizeof(delta_str));
+                    fprintf(stderr, "Auto-detected P=%s from k_combined delta\n", delta_str);
+                }
+            }
+        }
+
+        /* Use detected or specified P */
+        clock8_params_t use_params8;
+        clock8_params_init(&use_params8);
+        if (U128_LT(U128_ZERO, params8->sig_period)) {
+            use_params8.sig_period = params8->sig_period;
+        } else if (U128_LT(U128_ZERO, detected_P)) {
+            use_params8.sig_period = detected_P;
+        }
+
+        uint128_t elapsed_t, sig;
+        int rot = inverse8_time(masks + global_align_offset, &use_params8, &elapsed_t, &sig);
+        if (rot < 0) {
+            fprintf(stderr, "Error: Could not reconstruct 8-bit time\n");
+            return 1;
+        }
+
+        /* Warn if elapsed time is huge (suggests P is needed but wasn't detected) */
+        if (U128_EQ(use_params8.sig_period, U128_ZERO) && U128_HI(elapsed_t) > 0) {
+            fprintf(stderr, "Warning: elapsed time > 2^64, P probably needed\n");
+            fprintf(stderr, "  (need 2 aligned minutes for auto-detection, have %d)\n",
+                    aligned_minutes);
+        }
+
+        /* Adjust for alignment offset - elapsed_t is from aligned frames,
+         * subtract global_align_offset to get actual elapsed time */
+        elapsed_t = U128_SUB(elapsed_t, U128_FROM_U64(global_align_offset));
+        int first_sec = (60 - global_align_offset) % 60;
+
+        /* Convert 128-bit elapsed_t to time_t (truncate to 64-bit for practical use) */
+        uint64_t elapsed_t64 = U128_LO(elapsed_t);
+        time_t origin_time = start_time - (time_t)elapsed_t64;
+
+        struct tm *utc = gmtime(&origin_time);
+        char origin_str[64];
+        if (utc) {
+            strftime(origin_str, sizeof(origin_str), "%Y-%m-%dT%H:%M:%SZ", utc);
+        } else {
+            snprintf(origin_str, sizeof(origin_str), "(out of range)");
+        }
+
+        /* Format 128-bit values as strings */
+        char elapsed_str[50], minute_str[50], p_str[50], n_str[50];
+        u128_to_str(elapsed_t, elapsed_str, sizeof(elapsed_str));
+        u128_to_str(U128_DIV(elapsed_t, 60), minute_str, sizeof(minute_str));
+
+        /* Output in same format as 7-bit mode */
+        printf("elapsed_seconds: %s\n", elapsed_str);
+        printf("minute: %s\n", minute_str);
+        printf("first_second: %d\n", first_sec);
+        printf("\n");
+        printf("origin: %s\n", origin_str);
+
+        if (U128_LT(one, use_params8.sig_period)) {
+            u128_to_str(use_params8.sig_period, p_str, sizeof(p_str));
+            u128_to_str(sig, n_str, sizeof(n_str));
+            printf("\n");
+            printf("signature:\n");
+            printf("  P: %s\n", p_str);
+            printf("  N: %s\n", n_str);
+        }
+
+        return 0;
     }
 
     /* If P specified, decode N_era and go to output */
@@ -697,10 +819,11 @@ int main(int argc, char **argv) {
     clock_params_init(&params);
     render_opts_init(&render);
 
-    int inverse = 0, simulate = 0, inplace = 0, bits_mode = 0, decimal_mode = 0, raw_mode = 0, error_correct = 0;
+    int inverse = 0, simulate = 0, inplace = 0, bits_mode = 0, decimal_mode = 0, raw_mode = 0, error_correct = 0, mode8 = 0;
     int64_t num_frames = -1, start_t = -1;
     time_t origin = 0;
     int n_specified = 0;  /* Track if -N was explicitly provided */
+    const char *p_str = NULL, *n_str = NULL;  /* Store -P/-N strings for later parsing */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -716,6 +839,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-b") == 0) bits_mode = 1;
         else if (strcmp(argv[i], "-d") == 0) decimal_mode = 1;
         else if (strcmp(argv[i], "-r") == 0) raw_mode = 1;
+        else if (strcmp(argv[i], "-8") == 0) mode8 = 1;
         else if (strcmp(argv[i], "-p") == 0 && i+1 < argc)
             render_apply_preset(&render, argv[++i]);
         else if (strcmp(argv[i], "-f") == 0 && i+1 < argc) {
@@ -736,18 +860,39 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-n") == 0 && i+1 < argc)
             num_frames = atoll(argv[++i]);
         else if (strcmp(argv[i], "-P") == 0 && i+1 < argc) {
-            params.sig_period = strtoull(argv[++i], NULL, 10);
-            if (!is_coprime_60(params.sig_period)) {
-                fprintf(stderr, "Note: P=%llu has factors of 2, 3, or 5 (reduced entropy)\n",
-                        (unsigned long long)params.sig_period);
-            }
+            p_str = argv[++i];
         }
         else if (strcmp(argv[i], "-N") == 0 && i+1 < argc) {
-            params.sig_value = strtoull(argv[++i], NULL, 10);
+            n_str = argv[++i];
             n_specified = 1;
         }
     }
 
+    /* Parse P and N - use 128-bit for 8-bit mode, 64-bit otherwise */
+    clock8_params_t params8;
+    clock8_params_init(&params8);
+
+    if (p_str) {
+        if (mode8) {
+            params8.sig_period = str_to_u128(p_str);
+        } else {
+            params.sig_period = strtoull(p_str, NULL, 10);
+        }
+    }
+    if (n_str) {
+        if (mode8) {
+            params8.sig_value = str_to_u128(n_str);
+        } else {
+            params.sig_value = strtoull(n_str, NULL, 10);
+        }
+    }
+
+
+    /* 8-bit mode requires numeric output (visual only shows 7 cells) */
+    if (mode8 && !bits_mode && !decimal_mode && !raw_mode && !inverse) {
+        fprintf(stderr, "Warning: -8 mode requires -b, -d, or -r for output (visual only shows 7 cells)\n");
+        fprintf(stderr, "         Cell 30 will not be displayed. Use -d for decimal output.\n");
+    }
 
     /* Validate signature value */
     if (params.sig_period > 0 && params.sig_value >= params.sig_period) {
@@ -775,9 +920,35 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* 8-bit mode: validate P against period */
+    if (mode8 && !U128_EQ(params8.sig_period, U128_ZERO)) {
+        uint128_t period8 = str_to_u128(PERIOD8_STR);
+
+        /* Error if P > period */
+        if (!U128_LT(params8.sig_period, period8) && !U128_EQ(params8.sig_period, period8)) {
+            char p_str_buf[50];
+            u128_to_str(params8.sig_period, p_str_buf, sizeof(p_str_buf));
+            fprintf(stderr, "Error: P=%s exceeds clock period (%s minutes)\n",
+                    p_str_buf, PERIOD8_STR);
+            return 1;
+        }
+
+        /* Warn if era < 100 years */
+        /* era_minutes = period / P; era_years = era_minutes / (60 * 24 * 365.25) */
+        uint128_t era_minutes;
+        u128_divmod(period8, params8.sig_period, &era_minutes, NULL);
+        /* Approximate: if era_minutes < 52596000 (100 years in minutes), warn */
+        uint64_t min_100_years = 100ULL * 365 * 24 * 60;  /* ~52.6M */
+        if (U128_HI(era_minutes) == 0 && U128_LO(era_minutes) < min_100_years) {
+            double era_years = (double)U128_LO(era_minutes) / (60.0 * 24.0 * 365.25);
+            fprintf(stderr, "Warning: P too large, era cycles every %.1f years.\n", era_years);
+            fprintf(stderr, "         Origin recovery requires -N to specify N_0.\n");
+        }
+    }
+
     if (inverse) {
         int forced_format = raw_mode ? 3 : -1;  /* -1 = auto, 3 = raw */
-        return run_inverse(&params, n_specified, simulate, error_correct, forced_format);
+        return run_inverse(&params, &params8, n_specified, simulate, error_correct, forced_format, mode8);
     }
 
     /* Show era info when using signatures */
@@ -836,26 +1007,46 @@ int main(int argc, char **argv) {
 
         /* Get mask for this second */
         uint64_t t = (uint64_t)display_time;
-        uint8_t mask = get_mask(t, &params);
+        uint8_t mask;
+
+        if (mode8) {
+            /* 8-bit mode: use 128-bit time and 8 cells */
+            uint128_t t128 = U128_FROM_U64(t);
+            mask = get_mask8(t128, &params8);
+        } else {
+            mask = get_mask(t, &params);
+        }
 
         if (bits_mode) {
-            /* Output 7 bits: positions are 20,15,12,6,4,2,1 (LSB=cell 1 on right) */
+            /* Output bits: 8 bits in mode8, 7 bits otherwise */
             if (inplace && frame > 0 && IS_TTY()) printf("\r");
-            printf("%c%c%c%c%c%c%c",
-                   (mask & 0x40) ? '1' : '0',  /* cell 20 */
-                   (mask & 0x20) ? '1' : '0',  /* cell 15 */
-                   (mask & 0x10) ? '1' : '0',  /* cell 12 */
-                   (mask & 0x08) ? '1' : '0',  /* cell 6 */
-                   (mask & 0x04) ? '1' : '0',  /* cell 4 */
-                   (mask & 0x02) ? '1' : '0',  /* cell 2 */
-                   (mask & 0x01) ? '1' : '0'); /* cell 1 */
+            if (mode8) {
+                printf("%c%c%c%c%c%c%c%c",
+                       (mask & 0x80) ? '1' : '0',  /* cell 30 */
+                       (mask & 0x40) ? '1' : '0',  /* cell 20 */
+                       (mask & 0x20) ? '1' : '0',  /* cell 15 */
+                       (mask & 0x10) ? '1' : '0',  /* cell 12 */
+                       (mask & 0x08) ? '1' : '0',  /* cell 6 */
+                       (mask & 0x04) ? '1' : '0',  /* cell 4 */
+                       (mask & 0x02) ? '1' : '0',  /* cell 2 */
+                       (mask & 0x01) ? '1' : '0'); /* cell 1 */
+            } else {
+                printf("%c%c%c%c%c%c%c",
+                       (mask & 0x40) ? '1' : '0',  /* cell 20 */
+                       (mask & 0x20) ? '1' : '0',  /* cell 15 */
+                       (mask & 0x10) ? '1' : '0',  /* cell 12 */
+                       (mask & 0x08) ? '1' : '0',  /* cell 6 */
+                       (mask & 0x04) ? '1' : '0',  /* cell 4 */
+                       (mask & 0x02) ? '1' : '0',  /* cell 2 */
+                       (mask & 0x01) ? '1' : '0'); /* cell 1 */
+            }
             if (!inplace || !IS_TTY()) printf("\n");
         } else if (decimal_mode) {
             if (inplace && frame > 0 && IS_TTY()) printf("\r");
             printf("%d", mask);
             if (!inplace || !IS_TTY()) printf("\n");
         } else if (raw_mode) {
-            putchar(mask);  /* Binary byte, bit 7 = 0 */
+            putchar(mask);  /* Binary byte */
         } else {
             if (inplace && frame > 0 && IS_TTY()) printf("\033[13A");
             render_mask(mask, &render, stdout);

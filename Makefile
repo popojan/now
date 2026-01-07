@@ -5,8 +5,8 @@ CFLAGS = -O2 -Wall -Wextra
 SRCDIR = src
 BINDIR = bin
 
-SRCS = $(SRCDIR)/core.c $(SRCDIR)/render.c $(SRCDIR)/now.c
-HDRS = $(SRCDIR)/core.h $(SRCDIR)/render.h
+SRCS = $(SRCDIR)/core.c $(SRCDIR)/core8.c $(SRCDIR)/render.c $(SRCDIR)/now.c
+HDRS = $(SRCDIR)/core.h $(SRCDIR)/core8.h $(SRCDIR)/render.h
 TARGET = $(BINDIR)/now
 
 .PHONY: all clean test test-roundtrip test-signatures
