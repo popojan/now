@@ -639,6 +639,24 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* Validate P not exceeding clock period */
+    if (params.sig_period > PERIOD_ORIGINAL_MINUTES) {
+        fprintf(stderr, "Error: P=%llu exceeds clock period (%llu minutes)\n",
+                (unsigned long long)params.sig_period,
+                (unsigned long long)PERIOD_ORIGINAL_MINUTES);
+        return 1;
+    }
+
+    /* Warn if era length is short (< 100 years) */
+    if (params.sig_period > 0) {
+        uint64_t era_minutes = PERIOD_ORIGINAL_MINUTES / params.sig_period;
+        double era_years = (double)era_minutes / (60.0 * 24.0 * 365.25);
+        if (era_years < 100.0) {
+            fprintf(stderr, "Warning: P too large, era cycles every %.1f years.\n", era_years);
+            fprintf(stderr, "         Origin recovery requires -N to specify N_0.\n");
+        }
+    }
+
     if (inverse) {
         return run_inverse(&params, n_specified, simulate);
     }
