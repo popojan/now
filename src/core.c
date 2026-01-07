@@ -477,3 +477,111 @@ uint64_t detect_signature_period(uint8_t *masks, int num_frames) {
 
     return 0;
 }
+
+/* ============ Error Correction ============ */
+
+int get_valid_masks_for_sum(int sum, uint8_t *out_masks, int max_out) {
+    sum = ((sum % 60) + 60) % 60;  /* Normalize to 0-59 */
+    int count = COMBO_CNT[sum];
+    if (count > max_out) count = max_out;
+    for (int i = 0; i < count; i++) {
+        out_masks[i] = COMBOS[sum][i];
+    }
+    return count;
+}
+
+int hamming_distance(uint8_t a, uint8_t b) {
+    uint8_t x = a ^ b;
+    int count = 0;
+    while (x) {
+        count += x & 1;
+        x >>= 1;
+    }
+    return count;
+}
+
+uint8_t closest_valid_mask(uint8_t received, int target_sum, int *dist_out) {
+    target_sum = ((target_sum % 60) + 60) % 60;
+    int count = COMBO_CNT[target_sum];
+
+    uint8_t best_mask = COMBOS[target_sum][0];
+    int best_dist = hamming_distance(received, best_mask);
+
+    for (int i = 1; i < count; i++) {
+        int dist = hamming_distance(received, COMBOS[target_sum][i]);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_mask = COMBOS[target_sum][i];
+        }
+    }
+
+    if (dist_out) *dist_out = best_dist;
+    return best_mask;
+}
+
+int correct_errors(uint8_t *masks, int num_frames,
+                   frame_correction_t *corrections, int *anchor_count) {
+    if (num_frames < 1) return -1;
+
+    /* Step 1: Compute virtual_start for each frame */
+    int virtual_starts[600];
+    int vstart_counts[60] = {0};
+
+    for (int i = 0; i < num_frames && i < 600; i++) {
+        int sum = mask_to_sum(masks[i]);
+        /* virtual_start = (sum - i) mod 60 */
+        int vs = ((sum - i) % 60 + 60) % 60;
+        virtual_starts[i] = vs;
+        vstart_counts[vs]++;
+    }
+
+    /* Step 2: Find majority virtual_start */
+    int majority_vs = 0;
+    int majority_count = vstart_counts[0];
+    for (int vs = 1; vs < 60; vs++) {
+        if (vstart_counts[vs] > majority_count) {
+            majority_count = vstart_counts[vs];
+            majority_vs = vs;
+        }
+    }
+
+    /* If less than 50% agree, we can't reliably correct */
+    if (majority_count * 2 < num_frames) {
+        return -1;
+    }
+
+    /* Step 3: Mark anchors and correct errors */
+    int num_corrections = 0;
+    int num_anchors = 0;
+
+    for (int i = 0; i < num_frames && i < 600; i++) {
+        int received_sum = mask_to_sum(masks[i]);
+        int expected_sum = (majority_vs + i) % 60;
+
+        corrections[i].original = masks[i];
+        corrections[i].received_sum = received_sum;
+        corrections[i].expected_sum = expected_sum;
+
+        if (virtual_starts[i] == majority_vs) {
+            /* This frame is an anchor - sum matches expected */
+            corrections[i].corrected = masks[i];
+            corrections[i].distance = 0;
+            corrections[i].is_anchor = 1;
+            num_anchors++;
+        } else {
+            /* This frame needs correction */
+            int dist;
+            uint8_t corrected = closest_valid_mask(masks[i], expected_sum, &dist);
+            corrections[i].corrected = corrected;
+            corrections[i].distance = dist;
+            corrections[i].is_anchor = 0;
+            num_corrections++;
+
+            /* Update the mask in place */
+            masks[i] = corrected;
+        }
+    }
+
+    if (anchor_count) *anchor_count = num_anchors;
+    return num_corrections;
+}

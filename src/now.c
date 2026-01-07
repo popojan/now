@@ -70,6 +70,7 @@ static void usage(const char *prog) {
     printf("  -s          Simulate (fast, no delay)\n");
     printf("  -l          In-place update (TTY only)\n");
     printf("  -i          Inverse: read frames, detect P/N, output origin\n");
+    printf("  -e          Error correction (with -i): fix corrupted frames\n");
     printf("  -b          Bits: output cell mask per second (7 bits, LSB=cell 1)\n");
     printf("  -d          Decimal: output cell mask as number (0-127)\n");
     printf("  -r          Raw: output binary byte per second (bit 7 reserved)\n");
@@ -384,8 +385,9 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
  *   - Simulated (-s): origin = now - elapsed_t (frames are instant)
  *   - Live: origin = start_time - elapsed_t (accounts for real-time delay)
  */
-static int run_inverse(clock_params_t *params, int n_specified, int simulate) {
+static int run_inverse(clock_params_t *params, int n_specified, int simulate, int error_correct) {
     uint8_t masks[600];  /* Up to 10 minutes */
+    frame_correction_t corrections[600];
     int total = 0;
     int align_start = -1;  /* First frame at second 0 */
     int need_aligned = (params->sig_period == 0) ? 120 : 60;  /* 2 min for auto, 1 for known P */
@@ -455,6 +457,34 @@ static int run_inverse(clock_params_t *params, int n_specified, int simulate) {
 
     int num_minutes = total / 60;
     fprintf(stderr, "Have %d frames (%d complete minutes)\n", total, num_minutes);
+
+    /* Error correction if requested */
+    if (error_correct) {
+        int anchor_count = 0;
+        int num_corrected = correct_errors(masks, total, corrections, &anchor_count);
+
+        if (num_corrected < 0) {
+            fprintf(stderr, "Error correction failed: <50%% consensus\n");
+        } else {
+            fprintf(stderr, "Error correction: %d anchors, %d corrected\n",
+                    anchor_count, num_corrected);
+
+            if (num_corrected > 0) {
+                fprintf(stderr, "Corrections:\n");
+                for (int i = 0; i < total; i++) {
+                    if (corrections[i].distance > 0) {
+                        fprintf(stderr, "  Frame %d: sum %d->%d, mask 0x%02x->0x%02x (dist=%d)\n",
+                                i,
+                                corrections[i].received_sum,
+                                corrections[i].expected_sum,
+                                corrections[i].original,
+                                corrections[i].corrected,
+                                corrections[i].distance);
+                    }
+                }
+            }
+        }
+    }
 
     uint64_t elapsed_t = 0;
     uint64_t sig_P = 0, sig_N0 = 0, sig_Nera = 0;
@@ -667,7 +697,7 @@ int main(int argc, char **argv) {
     clock_params_init(&params);
     render_opts_init(&render);
 
-    int inverse = 0, simulate = 0, inplace = 0, bits_mode = 0, decimal_mode = 0, raw_mode = 0;
+    int inverse = 0, simulate = 0, inplace = 0, bits_mode = 0, decimal_mode = 0, raw_mode = 0, error_correct = 0;
     int64_t num_frames = -1, start_t = -1;
     time_t origin = 0;
     int n_specified = 0;  /* Track if -N was explicitly provided */
@@ -682,6 +712,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-l") == 0) inplace = 1;
         else if (strcmp(argv[i], "-s") == 0) simulate = 1;
         else if (strcmp(argv[i], "-i") == 0) inverse = 1;
+        else if (strcmp(argv[i], "-e") == 0) error_correct = 1;
         else if (strcmp(argv[i], "-b") == 0) bits_mode = 1;
         else if (strcmp(argv[i], "-d") == 0) decimal_mode = 1;
         else if (strcmp(argv[i], "-r") == 0) raw_mode = 1;
@@ -745,7 +776,7 @@ int main(int argc, char **argv) {
     }
 
     if (inverse) {
-        return run_inverse(&params, n_specified, simulate);
+        return run_inverse(&params, n_specified, simulate, error_correct);
     }
 
     /* Show era info when using signatures */

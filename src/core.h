@@ -88,4 +88,39 @@ int inverse_time(uint8_t masks[60], const clock_params_t *params,
  * Returns detected period, or 0 if no repetition found */
 uint64_t detect_signature_period(uint8_t *masks, int num_frames);
 
+/* ============ Error Correction ============ */
+
+/* All valid masks for a given second (sum) */
+int get_valid_masks_for_sum(int sum, uint8_t *out_masks, int max_out);
+
+/* Hamming distance between two masks */
+int hamming_distance(uint8_t a, uint8_t b);
+
+/* Find closest valid mask for target sum
+ * Returns the valid mask with minimum Hamming distance to 'received'
+ * Also returns the distance via *dist_out (can be NULL) */
+uint8_t closest_valid_mask(uint8_t received, int target_sum, int *dist_out);
+
+/* Error correction result for a frame */
+typedef struct {
+    uint8_t original;      /* Original received mask */
+    uint8_t corrected;     /* Corrected mask (or original if no correction needed) */
+    int expected_sum;      /* Expected sum from sequence */
+    int received_sum;      /* Actually received sum */
+    int distance;          /* Hamming distance of correction (0 = no error) */
+    int is_anchor;         /* 1 if this frame was an anchor (trusted) */
+} frame_correction_t;
+
+/* Correct errors in a sequence of masks
+ * Uses anchor-based algorithm:
+ * 1. Find virtual_start = (sum - position) mod 60 for each frame
+ * 2. Majority virtual_start defines the correct sequence
+ * 3. Frames matching majority are anchors
+ * 4. Other frames are corrected to closest valid mask
+ *
+ * Returns number of corrections made, -1 on failure
+ * Results are stored in corrections[] array */
+int correct_errors(uint8_t *masks, int num_frames,
+                   frame_correction_t *corrections, int *anchor_count);
+
 #endif /* NOW_CORE_H */
