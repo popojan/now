@@ -385,14 +385,14 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
  *   - Simulated (-s): origin = now - elapsed_t (frames are instant)
  *   - Live: origin = start_time - elapsed_t (accounts for real-time delay)
  */
-static int run_inverse(clock_params_t *params, int n_specified, int simulate, int error_correct) {
+static int run_inverse(clock_params_t *params, int n_specified, int simulate, int error_correct, int forced_format) {
     uint8_t masks[600];  /* Up to 10 minutes */
     frame_correction_t corrections[600];
     int total = 0;
     int align_start = -1;  /* First frame at second 0 */
     int need_aligned = (params->sig_period == 0) ? 120 : 60;  /* 2 min for auto, 1 for known P */
     time_t start_time = time(NULL);  /* For live mode correction */
-    int input_format = -1;  /* -1 = unknown, 0 = visual, 1 = bits, 2 = decimal */
+    int input_format = forced_format;  /* -1 = auto, 0 = visual, 1 = bits, 2 = decimal, 3 = raw */
 
     fprintf(stderr, "Reading frames from stdin...\n");
     while (total < 600) {
@@ -776,7 +776,8 @@ int main(int argc, char **argv) {
     }
 
     if (inverse) {
-        return run_inverse(&params, n_specified, simulate, error_correct);
+        int forced_format = raw_mode ? 3 : -1;  /* -1 = auto, 3 = raw */
+        return run_inverse(&params, n_specified, simulate, error_correct, forced_format);
     }
 
     /* Show era info when using signatures */
@@ -855,16 +856,16 @@ int main(int argc, char **argv) {
             if (!inplace || !IS_TTY()) printf("\n");
         } else if (raw_mode) {
             putchar(mask);  /* Binary byte, bit 7 = 0 */
-            fflush(stdout);
         } else {
             if (inplace && frame > 0 && IS_TTY()) printf("\033[13A");
             render_mask(mask, &render, stdout);
             printf("\n");
         }
-        fflush(stdout);
+        if (!simulate) {
+            fflush(stdout);
+            SLEEP_MS(50);
+        }
         frame++;
-
-        if (!simulate) SLEEP_MS(50);
     }
 
     return 0;
