@@ -77,7 +77,7 @@ static void usage(const char *prog) {
     printf("  -r          Raw: output binary byte per second (bit 7 reserved)\n");
     printf("  -8          8-bit mode: use 8 cells (1,2,4,6,12,15,20,30) for 99.8%% entropy\n");
     printf("  -W [a,b,c]  Wave mode: triangle wave 0→90→0 with period 2^a × 3^b × 5^c\n");
-    printf("              Default: full period (108,44,24). Message uses remaining capacity.\n");
+    printf("              Default: half split (54,22,12) ~117 bits each for period and message\n");
     printf("  -M VALUE    Message value to encode in wave mode (default: 0)\n");
     printf("  -n N        Output N frames then exit\n\n");
     printf("Display:\n");
@@ -912,10 +912,10 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-W") == 0) {
             wave_mode = 1;
             mode8 = 1;  /* Wave mode uses 8 cells */
-            /* Default to full period (no message channel) */
-            wave_period.exp2 = WAVE_EXP2_MAX;
-            wave_period.exp3 = WAVE_EXP3_MAX;
-            wave_period.exp5 = WAVE_EXP5_MAX;
+            /* Default to half-and-half split (~117 bits each) */
+            wave_period.exp2 = WAVE_EXP2_MAX / 2;  /* 54 */
+            wave_period.exp3 = WAVE_EXP3_MAX / 2;  /* 22 */
+            wave_period.exp5 = WAVE_EXP5_MAX / 2;  /* 12 */
             /* Override if explicit values provided */
             if (i+1 < argc && argv[i+1][0] != '-') {
                 int a, b, c;
@@ -1061,10 +1061,30 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Error: exp5 must be 0-%d (got %d)\n", WAVE_EXP5_MAX, wave_period.exp5);
             return 1;
         }
-        fprintf(stderr, "Wave mode: period 2^%d × 3^%d × 5^%d, message capacity 2^%d × 3^%d × 5^%d\n",
-                wave_period.exp2, wave_period.exp3, wave_period.exp5,
-                WAVE_EXP2_MAX - wave_period.exp2, WAVE_EXP3_MAX - wave_period.exp3,
-                WAVE_EXP5_MAX - wave_period.exp5);
+
+        /* Validate 128-bit constraint: both period and message must fit in uint128_t
+         * Period bits ≈ a + 1.585*b + 2.322*c (using log2(3)≈1.585, log2(5)≈2.322)
+         * Message bits ≈ 233.4 - period_bits
+         * Constraint: 105 ≤ period_bits ≤ 128 */
+        double period_bits = wave_period.exp2 + 1.585 * wave_period.exp3 + 2.322 * wave_period.exp5;
+        double msg_bits = 233.4 - period_bits;
+        if (period_bits > 128.0) {
+            fprintf(stderr, "Error: Period too large (%.1f bits > 128), reduce exponents\n", period_bits);
+            return 1;
+        }
+        if (msg_bits > 128.0) {
+            fprintf(stderr, "Error: Message capacity too large (%.1f bits > 128), increase exponents\n", msg_bits);
+            fprintf(stderr, "       Minimum: a + 1.585*b + 2.322*c >= 105\n");
+            return 1;
+        }
+
+        int msg_exp2 = WAVE_EXP2_MAX - wave_period.exp2;
+        int msg_exp3 = WAVE_EXP3_MAX - wave_period.exp3;
+        int msg_exp5 = WAVE_EXP5_MAX - wave_period.exp5;
+        fprintf(stderr, "Wave mode: period 2^%d × 3^%d × 5^%d (~%.0f bits)\n",
+                wave_period.exp2, wave_period.exp3, wave_period.exp5, period_bits);
+        fprintf(stderr, "           message capacity 2^%d × 3^%d × 5^%d (~%.0f bits)\n",
+                msg_exp2, msg_exp3, msg_exp5, msg_bits);
     }
 
     if (inverse) {
