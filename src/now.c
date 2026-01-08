@@ -244,11 +244,12 @@ static int parse_raw_byte(FILE *f, uint8_t *mask_out) {
 }
 
 /* Parse a single frame, auto-detecting display mode */
-static int parse_frame(FILE *f, uint8_t *mask_out) {
+static int parse_frame(FILE *f, uint8_t *mask_out, int mode8) {
     char line[256];
-    int cells_visible[8] = {0};
+    int cells_visible[9] = {0};  /* indices 1-8 for cells 1,2,4,6,12,15,20,30 */
     int half_width_mode = 0;
     int wide_mode = 0;
+    int num_cols = mode8 ? 9 : 6;
 
     /* Skip until we find a top border line (top-left corner) */
     while (fgets(line, sizeof(line), f)) {
@@ -257,9 +258,11 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
     }
     if (feof(f)) return -1;
 
-    /* Detect half-width mode from border: 6 dashes = half, 12 = normal */
+    /* Detect half-width mode from border:
+     * 7-cell: 6 cols normal = 12 dashes, half = 6 dashes
+     * 8-cell: 9 cols normal = 18 dashes, half = 9 dashes */
     int dashes = count_border_dashes(line);
-    half_width_mode = (dashes <= 8);
+    half_width_mode = (dashes <= num_cols + 2);
 
     /* Store content lines for mode detection and parsing */
     char content_lines[10][256];
@@ -286,8 +289,8 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
             int chars = get_content_chars(content_lines[i]);
             if (chars > max_chars) max_chars = chars;
         }
-        if (max_chars > 12) {
-            wide_mode = 0;  /* More than 12 chars = definitely doubled */
+        if (max_chars > num_cols * 2) {
+            wide_mode = 0;  /* More than expected chars = definitely doubled */
         } else {
             /* Check for odd-length runs of identical characters */
             int found_odd_run = 0;
@@ -320,7 +323,7 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
         if ((unsigned char)cline[pos] == 0xe2) pos += 3;
         else if (cline[pos] == '|') pos += 1;
 
-        for (int c = 0; c < 6 && cline[pos]; c++) {
+        for (int c = 0; c < num_cols && cline[pos]; c++) {
             int filled = is_fill_at(cline, pos);
             unsigned char ch = (unsigned char)cline[pos];
             int advance;
@@ -343,7 +346,7 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
             pos += advance;
 
             if (filled) {
-                int cell = GRID[row][c];
+                int cell = mode8 ? GRID8[row][c] : GRID[row][c];
                 cells_visible[cell_idx(cell)] = 1;
             }
         }
@@ -362,7 +365,8 @@ static int parse_frame(FILE *f, uint8_t *mask_out) {
                 (cells_visible[4] ? 0x08 : 0) |
                 (cells_visible[5] ? 0x10 : 0) |
                 (cells_visible[6] ? 0x20 : 0) |
-                (cells_visible[7] ? 0x40 : 0);
+                (cells_visible[7] ? 0x40 : 0) |
+                (mode8 && cells_visible[8] ? 0x80 : 0);  /* cell 30 */
     return 0;
 }
 
@@ -455,7 +459,7 @@ static int run_inverse(clock_params_t *params, clock8_params_t *params8, int n_s
         if (input_format == 1) ret = parse_bits_line(stdin, &m);
         else if (input_format == 2) ret = parse_decimal_line(stdin, &m);
         else if (input_format == 3) ret = parse_raw_byte(stdin, &m);
-        else ret = parse_frame(stdin, &m);
+        else ret = parse_frame(stdin, &m, mode8);
         if (ret < 0) {
             if (feof(stdin)) break;  /* End of input */
             continue;  /* Discard truncated frame, try next */
@@ -1027,7 +1031,10 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    /* --sum S: show all masks that produce this sum */
+    /* --sum S: show all masks that produce this sum
+     * In 7-bit mode: sums 0-59 (mod 60)
+     * In 8-bit mode (no -W): sums 0-59 (mod 60, combos can sum > 60)
+     * In wave mode (-W): full sums 0-90 */
     if (show_sum >= 0) {
         const int cells8[] = {1, 2, 4, 6, 12, 15, 20, 30};
         const int cells7[] = {1, 2, 4, 6, 12, 15, 20};
@@ -1040,7 +1047,9 @@ int main(int argc, char **argv) {
             int sum = 0;
             for (int i = 0; i < ncells; i++)
                 if (mask & (1 << i)) sum += cells[i];
-            if (sum != show_sum) continue;
+            /* Wave mode uses full sums 0-90; others use mod 60 */
+            int target_sum = wave_mode ? sum : (sum % 60);
+            if (target_sum != show_sum) continue;
 
             count++;
             if (bits_mode) {
@@ -1060,6 +1069,8 @@ int main(int argc, char **argv) {
                         first = 0;
                     }
                 }
+                if (!wave_mode && sum != show_sum)
+                    fprintf(stderr, " (sum=%d mod 60=%d)", sum, sum % 60);
                 fprintf(stderr, "\n");
                 render_mask((uint8_t)mask, &render, stdout);
             }
