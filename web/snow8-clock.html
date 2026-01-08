@@ -163,7 +163,7 @@
         <div id="minuteCounter">Minute: 0</div>
         <div id="secondBar"><div id="secondProgress"></div></div>
         <label>
-            <input type="checkbox" id="showControls" checked onchange="toggleControls()"> Show controls
+            <input type="checkbox" id="showControls" checked onchange="toggleControls()"> Show controls (press 'c' to toggle)
         </label>
         <div class="stats">
             <div>Cells: {1,2,4,6,12,15,20,30} sum=90</div>
@@ -463,9 +463,9 @@
 
     }, 50);
 
-    // Keyboard: Space to toggle controls
+    // Keyboard: 'c' to toggle controls
     document.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+        if ((e.key === 'c' || e.key === 'C') && e.target.tagName !== 'INPUT') {
             e.preventDefault();
             const checkbox = document.getElementById('showControls');
             checkbox.checked = !checkbox.checked;
