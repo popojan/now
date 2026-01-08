@@ -179,7 +179,7 @@
             <input type="range" id="speed" min="20" max="2000" value="1000" oninput="updateSpeed()">
         </label>
         <label>
-            <input type="checkbox" id="showControls" checked onchange="toggleControls()"> Show controls
+            <input type="checkbox" id="showControls" checked onchange="toggleControls()"> Show controls (press 'c' to toggle)
         </label>
         <div class="stats">
             <div>Cells: {1,2,4,6,12,15,20,30} sum=90</div>
@@ -539,9 +539,10 @@
     step();
     restartInterval();
 
-    // Keyboard: Space to pause
+    // Keyboard: Space to pause, 'c' to toggle controls
     document.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+        if (e.target.tagName === 'INPUT') return;
+        if (e.code === 'Space') {
             e.preventDefault();
             if (intervalId) {
                 clearInterval(intervalId);
@@ -550,6 +551,11 @@
             } else {
                 restartInterval();
             }
+        } else if (e.key === 'c' || e.key === 'C') {
+            e.preventDefault();
+            const checkbox = document.getElementById('showControls');
+            checkbox.checked = !checkbox.checked;
+            toggleControls();
         }
     });
 
