@@ -168,8 +168,8 @@
         <div class="stats">
             <div>Cells: {1,2,4,6,12,15,20,30} sum=90</div>
             <div>Combos per second: 3-5 (mod 60)</div>
-            <div>Period: <span class="period">2^30 × 3^16</span> minutes</div>
-            <div>≈ 88 billion years (6× age of universe)</div>
+            <div>Period: <span class="period">3^8 × 4^28 × 5^24</span> minutes</div>
+            <div>≈ 5×10^31 years</div>
             <div>Entropy: <span class="highlight">7.98 bits/second</span> (99.8%)</div>
             <div id="eraInfo"></div>
         </div>
@@ -255,8 +255,8 @@
         59: [[2, 12, 15, 30], [1, 2, 6, 20, 30], [2, 4, 6, 12, 15, 20]],
     };
 
-    // Period: 2^30 × 3^16 minutes ≈ 88 billion years
-    const CLOCK_PERIOD = 46221064723759104n;
+    // Period: 3^8 × 4^28 × 5^24 minutes ≈ 5×10^31 years
+    const CLOCK_PERIOD = 28179280429056000000000000000000000000n;
 
     // Signature parameters (coprime with 60)
     let sigP = 1n;  // Period divisor (must be coprime with 60)
