@@ -272,10 +272,14 @@
     function setOrigin() {
         const val = document.getElementById('originInput').value.trim();
         if (!val) return;
+        if (val.toLowerCase() === 'now') {
+            setOriginNow();
+            return;
+        }
         try {
             const newOrigin = new Date(val);
             if (isNaN(newOrigin.getTime())) {
-                alert('Invalid date format. Use ISO 8601 (e.g., 2024-01-01T00:00:00Z)');
+                alert('Invalid date format. Use ISO 8601 (e.g., 2024-01-01T00:00:00Z) or "now"');
                 return;
             }
             origin = newOrigin;
