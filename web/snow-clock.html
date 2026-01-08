@@ -3,16 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <link rel="shortcut icon" href="/favicon.png" type="image/x-icon" />
-    <title>Snow8-Clock - 8-bit Mondrian Clock with Signature Encoding</title>
+    <title>Snow-Clock - 7-bit Mondrian Clock with Signature Encoding</title>
     <style>
         body { background-color: #DDDDDD; }
         tr { height: 10%; padding: 0; margin: 0;}
         td { border: 1vh solid #303030; text-align: center; vertical-align: center; padding:0; margin:0;}
+        td.c20 { width: 66.6667%; height: 50%; }
+        td.c15 { width: 50%; height: 50%; }
+        td.c12 { width: 33.3334%; height: 60%; }
+        td.c6 { width: 50%; height: 20%; }
+        td.c4 { width: 33.3334%; height: 20%; }
+        td.c2 { width: 16.6667%; height: 20%; }
+        td.c1 { width: 16.6667%; height: 10%; }
         table {
             border-collapse: collapse;
             table-layout: fixed;
-            width: 54vh;  /* 9 columns */
-            height: 60vh; /* 10 rows */
+            width: 36vh;
+            height: 60vh;
             margin: 0;
             padding: 0;
             color: rgba(0,0,0,0.5);
@@ -119,29 +126,26 @@
 </head>
 <body>
     <div class="center">
-        <!-- Grid: 10 rows × 9 columns -->
         <table>
-            <tr>
-                <td id="c15" rowspan="5" colspan="3"></td>
-                <td id="c30" rowspan="5" colspan="6"></td>
+            <tr><td id="c20" class="c20" rowspan="5" colspan="4"></td>
+                <td id="c12" class="c12" rowspan="6" colspan="2"></td>
             </tr>
             <tr></tr>
             <tr></tr>
             <tr></tr>
             <tr></tr>
             <tr>
-                <td id="c20" rowspan="5" colspan="4"></td>
-                <td id="c1" rowspan="1" colspan="1"></td>
-                <td id="c2" rowspan="1" colspan="2"></td>
-                <td id="c4" rowspan="2" colspan="2"></td>
+                <td id="c15" class="c15" rowspan="5" colspan="3"></td>
+                <td id="c1" class="c1" rowspan="1" colspan="1"></td>
             </tr>
             <tr>
-                <td id="c12" rowspan="4" colspan="3"></td>
-            </tr>
-            <tr>
-                <td id="c6" rowspan="3" colspan="2"></td>
+                <td id="c2" class="c2" rowspan="2" colspan="1"></td>
+                <td id="c4" class="c4" rowspan="2" colspan="2"></td>
             </tr>
             <tr></tr>
+            <tr>
+                <td id="c6" class="c6" rowspan="2" colspan="3"></td>
+            </tr>
             <tr></tr>
         </table>
     </div>
@@ -155,7 +159,7 @@
         <div style="margin-top:10px">Signature Encoding</div>
         <div class="param-row">
             <label>P:</label>
-            <input type="text" id="paramP" placeholder="Period (coprime 60)" value="1">
+            <input type="text" id="paramP" placeholder="Period divisor" value="1">
             <label>N:</label>
             <input type="text" id="paramN" placeholder="Value" value="0">
             <button onclick="setParams()">Set</button>
@@ -166,100 +170,70 @@
             <input type="checkbox" id="showControls" checked onchange="toggleControls()"> Show controls (press 'c' to toggle)
         </label>
         <div class="stats">
-            <div>Cells: {1,2,4,6,12,15,20,30} sum=90</div>
-            <div>Combos per second: 3-5 (mod 60)</div>
-            <div>Period: <span class="period">3^8 × 4^28 × 5^24</span> minutes</div>
-            <div>≈ 5×10^31 years</div>
-            <div>Entropy: <span class="highlight">7.98 bits/second</span> (99.8%)</div>
+            <div>Cells: {1,2,4,6,12,15,20} sum=60</div>
+            <div>Combos per second: 1-4</div>
+            <div>Period: <span class="period">2^30 x 3^16</span> minutes</div>
+            <div>= 88 billion years</div>
+            <div>Entropy: <span class="highlight">6.94 bits/second</span> (99.1%)</div>
             <div id="eraInfo"></div>
         </div>
     </div>
     <div id="info"></div>
 <script type="text/javascript">
-    // Cell weights
-    const CELLS = [1, 2, 4, 6, 12, 15, 20, 30];
-
-    // 4 colors, each used exactly twice, no adjacent cells share color
+    // Mondrian colors - original design
     const colors = {
-        30: "rgba(0,0,255,1.0)",     // blue (pair with 12)
-        20: "rgba(255,255,0,1.0)",   // yellow (pair with 2)
-        15: "rgba(255,0,0,1.0)",     // red (pair with 6)
-        12: "rgba(0,0,255,1.0)",     // blue (pair with 30)
-        6:  "rgba(255,0,0,1.0)",     // red (pair with 15)
-        4:  "rgba(30,30,30,1.0)",    // black (pair with 1)
-        2:  "rgba(255,255,0,1.0)",   // yellow (pair with 20)
-        1:  "rgba(30,30,30,1.0)"     // black (pair with 4)
+        20: "rgba(255,255,0,1.0)",   // yellow
+        15: "rgba(255,0,0,1.0)",     // red
+        12: "rgba(0,0,255,1.0)",     // blue
+        6:  "rgba(0,0,255,1.0)",     // blue
+        4:  "rgba(30,30,30,1.0)",    // black
+        2:  "rgba(255,255,0,1.0)",   // yellow
+        1:  "rgba(30,30,30,1.0)"     // black
     };
 
-    // 8-cell ordering: 256 total combinations, 3-5 per second (sum mod 60)
+    const CELLS = [1, 2, 4, 6, 12, 15, 20];
+
     const ordering = {
-        0: [[], [4, 6, 20, 30], [1, 2, 12, 15, 30], [1, 2, 4, 6, 12, 15, 20]],
-        1: [[1], [4, 12, 15, 30], [1, 4, 6, 20, 30]],
-        2: [[2], [12, 20, 30], [1, 4, 12, 15, 30], [2, 4, 6, 20, 30]],
-        3: [[1, 2], [1, 12, 20, 30], [6, 12, 15, 30], [2, 4, 12, 15, 30], [1, 2, 4, 6, 20, 30]],
-        4: [[4], [2, 12, 20, 30], [1, 6, 12, 15, 30], [1, 2, 4, 12, 15, 30]],
-        5: [[1, 4], [15, 20, 30], [1, 2, 12, 20, 30], [2, 6, 12, 15, 30]],
-        6: [[6], [2, 4], [1, 15, 20, 30], [4, 12, 20, 30], [1, 2, 6, 12, 15, 30]],
-        7: [[1, 6], [1, 2, 4], [2, 15, 20, 30], [1, 4, 12, 20, 30], [4, 6, 12, 15, 30]],
-        8: [[2, 6], [6, 12, 20, 30], [1, 2, 15, 20, 30], [2, 4, 12, 20, 30], [1, 4, 6, 12, 15, 30]],
-        9: [[1, 2, 6], [4, 15, 20, 30], [1, 6, 12, 20, 30], [1, 2, 4, 12, 20, 30], [2, 4, 6, 12, 15, 30]],
-        10: [[4, 6], [1, 4, 15, 20, 30], [2, 6, 12, 20, 30], [1, 2, 4, 6, 12, 15, 30]],
-        11: [[1, 4, 6], [6, 15, 20, 30], [2, 4, 15, 20, 30], [1, 2, 6, 12, 20, 30]],
-        12: [[12], [2, 4, 6], [1, 6, 15, 20, 30], [4, 6, 12, 20, 30], [1, 2, 4, 15, 20, 30]],
-        13: [[1, 12], [1, 2, 4, 6], [2, 6, 15, 20, 30], [1, 4, 6, 12, 20, 30]],
-        14: [[2, 12], [1, 2, 6, 15, 20, 30], [2, 4, 6, 12, 20, 30]],
-        15: [[15], [1, 2, 12], [4, 6, 15, 20, 30], [1, 2, 4, 6, 12, 20, 30]],
-        16: [[1, 15], [4, 12], [1, 4, 6, 15, 20, 30]],
-        17: [[2, 15], [1, 4, 12], [12, 15, 20, 30], [2, 4, 6, 15, 20, 30]],
-        18: [[6, 12], [1, 2, 15], [2, 4, 12], [1, 12, 15, 20, 30], [1, 2, 4, 6, 15, 20, 30]],
-        19: [[4, 15], [1, 6, 12], [1, 2, 4, 12], [2, 12, 15, 20, 30]],
-        20: [[20], [1, 4, 15], [2, 6, 12], [1, 2, 12, 15, 20, 30]],
-        21: [[1, 20], [6, 15], [2, 4, 15], [1, 2, 6, 12], [4, 12, 15, 20, 30]],
-        22: [[2, 20], [1, 6, 15], [4, 6, 12], [1, 2, 4, 15], [1, 4, 12, 15, 20, 30]],
-        23: [[1, 2, 20], [2, 6, 15], [1, 4, 6, 12], [6, 12, 15, 20, 30], [2, 4, 12, 15, 20, 30]],
-        24: [[4, 20], [1, 2, 6, 15], [2, 4, 6, 12], [1, 6, 12, 15, 20, 30], [1, 2, 4, 12, 15, 20, 30]],
-        25: [[1, 4, 20], [4, 6, 15], [1, 2, 4, 6, 12], [2, 6, 12, 15, 20, 30]],
-        26: [[6, 20], [2, 4, 20], [1, 4, 6, 15], [1, 2, 6, 12, 15, 20, 30]],
-        27: [[12, 15], [1, 6, 20], [1, 2, 4, 20], [2, 4, 6, 15], [4, 6, 12, 15, 20, 30]],
-        28: [[1, 12, 15], [2, 6, 20], [1, 2, 4, 6, 15], [1, 4, 6, 12, 15, 20, 30]],
-        29: [[2, 12, 15], [1, 2, 6, 20], [2, 4, 6, 12, 15, 20, 30]],
-        30: [[30], [4, 6, 20], [1, 2, 12, 15], [1, 2, 4, 6, 12, 15, 20, 30]],
-        31: [[1, 30], [4, 12, 15], [1, 4, 6, 20]],
-        32: [[2, 30], [12, 20], [1, 4, 12, 15], [2, 4, 6, 20]],
-        33: [[1, 2, 30], [1, 12, 20], [6, 12, 15], [2, 4, 12, 15], [1, 2, 4, 6, 20]],
-        34: [[4, 30], [2, 12, 20], [1, 6, 12, 15], [1, 2, 4, 12, 15]],
-        35: [[15, 20], [1, 4, 30], [1, 2, 12, 20], [2, 6, 12, 15]],
-        36: [[6, 30], [1, 15, 20], [2, 4, 30], [4, 12, 20], [1, 2, 6, 12, 15]],
-        37: [[1, 6, 30], [2, 15, 20], [1, 2, 4, 30], [1, 4, 12, 20], [4, 6, 12, 15]],
-        38: [[2, 6, 30], [6, 12, 20], [1, 2, 15, 20], [2, 4, 12, 20], [1, 4, 6, 12, 15]],
-        39: [[4, 15, 20], [1, 2, 6, 30], [1, 6, 12, 20], [1, 2, 4, 12, 20], [2, 4, 6, 12, 15]],
-        40: [[4, 6, 30], [1, 4, 15, 20], [2, 6, 12, 20], [1, 2, 4, 6, 12, 15]],
-        41: [[6, 15, 20], [1, 4, 6, 30], [2, 4, 15, 20], [1, 2, 6, 12, 20]],
-        42: [[12, 30], [1, 6, 15, 20], [2, 4, 6, 30], [4, 6, 12, 20], [1, 2, 4, 15, 20]],
-        43: [[1, 12, 30], [2, 6, 15, 20], [1, 2, 4, 6, 30], [1, 4, 6, 12, 20]],
-        44: [[2, 12, 30], [1, 2, 6, 15, 20], [2, 4, 6, 12, 20]],
-        45: [[15, 30], [1, 2, 12, 30], [4, 6, 15, 20], [1, 2, 4, 6, 12, 20]],
-        46: [[1, 15, 30], [4, 12, 30], [1, 4, 6, 15, 20]],
-        47: [[2, 15, 30], [12, 15, 20], [1, 4, 12, 30], [2, 4, 6, 15, 20]],
-        48: [[6, 12, 30], [1, 2, 15, 30], [1, 12, 15, 20], [2, 4, 12, 30], [1, 2, 4, 6, 15, 20]],
-        49: [[4, 15, 30], [1, 6, 12, 30], [2, 12, 15, 20], [1, 2, 4, 12, 30]],
-        50: [[20, 30], [1, 4, 15, 30], [2, 6, 12, 30], [1, 2, 12, 15, 20]],
-        51: [[1, 20, 30], [6, 15, 30], [2, 4, 15, 30], [4, 12, 15, 20], [1, 2, 6, 12, 30]],
-        52: [[2, 20, 30], [1, 6, 15, 30], [4, 6, 12, 30], [1, 2, 4, 15, 30], [1, 4, 12, 15, 20]],
-        53: [[1, 2, 20, 30], [2, 6, 15, 30], [6, 12, 15, 20], [1, 4, 6, 12, 30], [2, 4, 12, 15, 20]],
-        54: [[4, 20, 30], [1, 2, 6, 15, 30], [1, 6, 12, 15, 20], [2, 4, 6, 12, 30], [1, 2, 4, 12, 15, 20]],
-        55: [[1, 4, 20, 30], [4, 6, 15, 30], [2, 6, 12, 15, 20], [1, 2, 4, 6, 12, 30]],
-        56: [[6, 20, 30], [2, 4, 20, 30], [1, 4, 6, 15, 30], [1, 2, 6, 12, 15, 20]],
-        57: [[12, 15, 30], [1, 6, 20, 30], [1, 2, 4, 20, 30], [2, 4, 6, 15, 30], [4, 6, 12, 15, 20]],
-        58: [[1, 12, 15, 30], [2, 6, 20, 30], [1, 2, 4, 6, 15, 30], [1, 4, 6, 12, 15, 20]],
-        59: [[2, 12, 15, 30], [1, 2, 6, 20, 30], [2, 4, 6, 12, 15, 20]],
+        0: [[1, 2, 4, 6, 12, 15, 20], []],
+        1: [[1]], 2: [[2]], 3: [[1, 2]], 4: [[4]], 5: [[1, 4]],
+        6: [[6], [2, 4]], 7: [[1, 6], [1, 2, 4]], 8: [[2, 6]], 9: [[1, 2, 6]],
+        10: [[4, 6]], 11: [[1, 4, 6]], 12: [[12], [2, 4, 6]], 13: [[1, 12], [1, 2, 4, 6]],
+        14: [[2, 12]], 15: [[15], [1, 2, 12]], 16: [[1, 15], [4, 12]],
+        17: [[2, 15], [1, 4, 12]], 18: [[1, 2, 15], [6, 12], [2, 4, 12]],
+        19: [[4, 15], [1, 6, 12], [1, 2, 4, 12]], 20: [[20], [1, 4, 15], [2, 6, 12]],
+        21: [[1, 20], [6, 15], [2, 4, 15], [1, 2, 6, 12]],
+        22: [[2, 20], [1, 6, 15], [1, 2, 4, 15], [4, 6, 12]],
+        23: [[1, 2, 20], [2, 6, 15], [1, 4, 6, 12]], 24: [[4, 20], [1, 2, 6, 15], [2, 4, 6, 12]],
+        25: [[1, 4, 20], [4, 6, 15], [1, 2, 4, 6, 12]], 26: [[6, 20], [2, 4, 20], [1, 4, 6, 15]],
+        27: [[1, 6, 20], [1, 2, 4, 20], [12, 15], [2, 4, 6, 15]],
+        28: [[1, 12, 15], [2, 6, 20], [1, 2, 4, 6, 15]], 29: [[1, 2, 6, 20], [2, 12, 15]],
+        30: [[1, 2, 12, 15], [4, 6, 20]], 31: [[1, 4, 6, 20], [4, 12, 15]],
+        32: [[12, 20], [1, 4, 12, 15], [2, 4, 6, 20]],
+        33: [[1, 12, 20], [1, 2, 4, 6, 20], [6, 12, 15], [2, 4, 12, 15]],
+        34: [[2, 12, 20], [1, 6, 12, 15], [1, 2, 4, 12, 15]],
+        35: [[15, 20], [1, 2, 12, 20], [2, 6, 12, 15]],
+        36: [[1, 15, 20], [4, 12, 20], [1, 2, 6, 12, 15]],
+        37: [[2, 15, 20], [1, 4, 12, 20], [4, 6, 12, 15]],
+        38: [[1, 2, 15, 20], [6, 12, 20], [2, 4, 12, 20], [1, 4, 6, 12, 15]],
+        39: [[4, 15, 20], [1, 6, 12, 20], [1, 2, 4, 12, 20], [2, 4, 6, 12, 15]],
+        40: [[1, 4, 15, 20], [2, 6, 12, 20], [1, 2, 4, 6, 12, 15]],
+        41: [[6, 15, 20], [2, 4, 15, 20], [1, 2, 6, 12, 20]],
+        42: [[1, 6, 15, 20], [1, 2, 4, 15, 20], [4, 6, 12, 20]],
+        43: [[2, 6, 15, 20], [1, 4, 6, 12, 20]], 44: [[1, 2, 6, 15, 20], [2, 4, 6, 12, 20]],
+        45: [[4, 6, 15, 20], [1, 2, 4, 6, 12, 20]], 46: [[1, 4, 6, 15, 20]],
+        47: [[12, 15, 20], [2, 4, 6, 15, 20]], 48: [[1, 12, 15, 20], [1, 2, 4, 6, 15, 20]],
+        49: [[2, 12, 15, 20]], 50: [[1, 2, 12, 15, 20]], 51: [[4, 12, 15, 20]],
+        52: [[1, 4, 12, 15, 20]], 53: [[6, 12, 15, 20], [2, 4, 12, 15, 20]],
+        54: [[1, 6, 12, 15, 20], [1, 2, 4, 12, 15, 20]], 55: [[2, 6, 12, 15, 20]],
+        56: [[1, 2, 6, 12, 15, 20]], 57: [[4, 6, 12, 15, 20]], 58: [[1, 4, 6, 12, 15, 20]],
+        59: [[2, 4, 6, 12, 15, 20]]
     };
 
-    // Period: 3^8 × 4^28 × 5^24 minutes ≈ 5×10^31 years
-    const CLOCK_PERIOD = 28179280429056000000000000000000000000n;
+    // Period constant: 2^30 * 3^16 minutes
+    const CLOCK_PERIOD = 46221064723759104n;
 
-    // Signature parameters (coprime with 60)
-    let sigP = 1n;  // Period divisor (must be coprime with 60)
+    // Signature parameters
+    let sigP = 1n;  // Period divisor
     let sigN = 0n;  // Signature value (0 to P-1)
 
     // Parse URL parameters
@@ -268,6 +242,41 @@
     const initialP = params.get('P') || params.get('p') || "1";
     const initialN = params.get('N') || params.get('n') || "0";
     const hideControls = params.get('controls') === '0';
+
+    function integerDigitsBasePad(n, base, width) {
+        return n.toString(base).padStart(width, "0").split("").map(x => parseInt(x));
+    }
+
+    function perm(minute, P, N) {
+        let k;
+        if (P <= 1n) {
+            k = minute % CLOCK_PERIOD;
+        } else {
+            // Era length in minutes
+            const eraLen = CLOCK_PERIOD / P;
+            // Offset for this signature value
+            const offset = (N % P) * eraLen;
+            k = (minute + offset) % CLOCK_PERIOD;
+        }
+
+        // Original 7-bit permutation algorithm
+        let ret = [];
+        let k3 = integerDigitsBasePad((k - k % 1073741824n) / 1073741824n, 3, 16);
+        let rest = integerDigitsBasePad(k % 1073741824n, 2, 30);
+        let k4 = [];
+        let k2 = rest.slice(0, 18);
+        for (let i = 0; i < 12; i += 2) {
+            k4.push(parseInt(rest.slice(i + 18, i + 20).join(""), 2));
+        }
+        for (let i = 0; i < 60; ++i) {
+            let m = ordering[i].length;
+            if (m === 1) ret.push(0);
+            else if (m === 2) ret.push(k2.shift());
+            else if (m === 3) ret.push(k3.shift());
+            else if (m === 4) ret.push(k4.shift());
+        }
+        return ret;
+    }
 
     function setOrigin() {
         const val = document.getElementById('originInput').value.trim();
@@ -298,7 +307,7 @@
     }
 
     function updateOriginDisplay() {
-        // Strip milliseconds from ISO string
+        // Strip milliseconds from ISO string (not used)
         document.getElementById('originInput').value = origin.toISOString().replace(/\.\d{3}Z$/, 'Z');
     }
 
@@ -313,32 +322,6 @@
             url.searchParams.delete('N');
         }
         window.history.replaceState({}, '', url);
-    }
-
-    // Permutation function with signature encoding
-    // For minute m, signature value N, period P:
-    // k = (m + N * (CLOCK_PERIOD / P)) mod CLOCK_PERIOD
-    function perm(minute, P, N) {
-        let k;
-        if (P <= 1n) {
-            k = minute % CLOCK_PERIOD;
-        } else {
-            // Era length in minutes
-            const eraLen = CLOCK_PERIOD / P;
-            // Offset for this signature value
-            const offset = (N % P) * eraLen;
-            k = (minute + offset) % CLOCK_PERIOD;
-        }
-
-        // Convert to combo indices
-        let ret = [];
-        let kNum = Number(k % 1000000007n);
-        for (let i = 0; i < 60; ++i) {
-            let m = ordering[i].length;
-            let selector = (kNum + i * 17 + (kNum >> (i % 20))) % m;
-            ret.push(Math.floor(selector) % m);
-        }
-        return ret;
     }
 
     function setParams() {
@@ -426,7 +409,7 @@
         const tt = perm(minute, sigP, sigN);
         const cells = ordering[currentSecond][tt[currentSecond]];
 
-        // Update all 8 cells
+        // Update all 7 cells
         for (const cellWeight of CELLS) {
             const el = document.getElementById('c' + cellWeight);
             const visible = cells.includes(cellWeight);
@@ -455,14 +438,13 @@
                     (cells.includes(6) ? 8 : 0) |
                     (cells.includes(12) ? 16 : 0) |
                     (cells.includes(15) ? 32 : 0) |
-                    (cells.includes(20) ? 64 : 0) |
-                    (cells.includes(30) ? 128 : 0);
+                    (cells.includes(20) ? 64 : 0);
         const sum = cells.reduce((a, b) => a + b, 0);
         const combosForSecond = ordering[currentSecond].length;
 
         document.getElementById('info').innerHTML =
             `Second: <b>${currentSecond}</b> | ` +
-            `Sum: ${sum} (mod 60 = ${sum % 60}) | ` +
+            `Sum: ${sum} | ` +
             `Combo: ${tt[currentSecond] + 1}/${combosForSecond} | ` +
             `Mask: 0x${mask.toString(16).padStart(2,'0')} | ` +
             `Cells: [${cells.length > 0 ? cells.join('+') : 'none'}]`;

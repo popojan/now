@@ -325,7 +325,8 @@
     }
 
     function updateOriginDisplay() {
-        document.getElementById('originInput').value = origin ? origin.toISOString() : '';
+        // Strip milliseconds from ISO string (not used)
+        document.getElementById('originInput').value = origin ? origin.toISOString().replace(/\.\d{3}Z$/, 'Z') : '';
     }
 
     function updateSpeedUI() {
