@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="/favicon.png" type="image/x-icon" />
+    <title>SnowW-Clock - Wave Mode Clock with Message Channel (10^24 period)</title>
+    <style>
+        body { background-color: #DDDDDD; }
+        tr { height: 10%; padding: 0; margin: 0;}
+        td { border: 1vh solid #303030; text-align: center; vertical-align: center; padding:0; margin:0;}
+        table {
+            border-collapse: collapse;
+            table-layout: fixed;
+            width: 54vh;  /* 9 columns */
+            height: 60vh; /* 10 rows */
+            margin: 0;
+            padding: 0;
+            color: rgba(0,0,0,0.5);
+            font-family: sans-serif;
+            font-weight: bold;
+            font-size: 250%;
+            box-shadow: 1vh 1vh 2vh #A0A0A0;
+            background-color: #FFFFFF;
+        }
+        .center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 10px;
+        }
+        #info {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #666;
+            max-width: 90%;
+            background: rgba(255,255,255,0.9);
+            padding: 8px;
+            border-radius: 4px;
+        }
+        #controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            font-family: sans-serif;
+            font-size: 14px;
+            background: rgba(255,255,255,0.95);
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            max-width: 420px;
+        }
+        #controls input[type="text"] {
+            width: 280px;
+            padding: 5px;
+            font-family: monospace;
+        }
+        #controls button {
+            padding: 5px 15px;
+            margin-left: 5px;
+            cursor: pointer;
+        }
+        #controls label {
+            display: block;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #666;
+        }
+        #controls input[type="range"] {
+            width: 200px;
+        }
+        .hidden { display: none; }
+        #progress {
+            width: 100%;
+            height: 4px;
+            background: #ddd;
+            margin-top: 8px;
+            border-radius: 2px;
+        }
+        #progressBar {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            border-radius: 2px;
+            transition: width 0.05s;
+        }
+        .stats {
+            margin-top: 10px;
+            padding: 8px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: monospace;
+            line-height: 1.4;
+        }
+        .highlight { color: #d32f2f; font-weight: bold; }
+        .period { color: #1976d2; font-weight: bold; }
+        #waveIndicator {
+            margin-top: 8px;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+        }
+        #wavePosition {
+            position: absolute;
+            width: 4px;
+            height: 100%;
+            background: #d32f2f;
+            transition: left 0.05s;
+        }
+        #wavePath {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        #frameCounter {
+            font-size: 18px;
+            font-family: monospace;
+            padding: 10px;
+            background: #222;
+            color: #0f0;
+            border-radius: 4px;
+            margin-top: 10px;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="center">
+        <!-- Grid: 10 rows x 9 columns -->
+        <table>
+            <tr>
+                <td id="c15" rowspan="5" colspan="3"></td>
+                <td id="c30" rowspan="5" colspan="6"></td>
+            </tr>
+            <tr></tr>
+            <tr></tr>
+            <tr></tr>
+            <tr></tr>
+            <tr>
+                <td id="c20" rowspan="5" colspan="4"></td>
+                <td id="c1" rowspan="1" colspan="1"></td>
+                <td id="c2" rowspan="1" colspan="2"></td>
+                <td id="c4" rowspan="2" colspan="2"></td>
+            </tr>
+            <tr>
+                <td id="c12" rowspan="4" colspan="3"></td>
+            </tr>
+            <tr>
+                <td id="c6" rowspan="3" colspan="2"></td>
+            </tr>
+            <tr></tr>
+            <tr></tr>
+        </table>
+    </div>
+    <div id="controls">
+        <div>
+            <input type="text" id="message" placeholder="Enter message to transmit...">
+            <button onclick="setMessage()">Set Message</button>
+        </div>
+        <div id="frameCounter">Cycle: 0 / 10^0</div>
+        <div id="progress"><div id="progressBar"></div></div>
+        <div id="waveIndicator">
+            <canvas id="wavePath"></canvas>
+            <div id="wavePosition"></div>
+        </div>
+        <label>Speed: <span id="speedLabel">1000</span>ms
+            <input type="range" id="speed" min="20" max="2000" value="1000" oninput="updateSpeed()">
+        </label>
+        <label>
+            <input type="checkbox" id="showControls" checked onchange="toggleControls()"> Show controls
+        </label>
+        <div class="stats">
+            <div>Cells: {1,2,4,6,12,15,20,30} sum=90</div>
+            <div>Wave: 0→90→0 (180 frames/cycle)</div>
+            <div>Period: <span class="period" id="periodInfo">calculating...</span> cycles (180 frames each)</div>
+            <div>Message capacity: <span class="highlight" id="msgCapacity">calculating...</span></div>
+            <div>Current message: <span id="msgInfo">-</span></div>
+        </div>
+    </div>
+    <div id="info"></div>
+<script type="text/javascript">
+    // Cell weights and colors
+    const CELLS = [1, 2, 4, 6, 12, 15, 20, 30];
+    const TOTAL_SUM = 90;
+    // 4 colors, each used exactly twice, no adjacent cells share color
+    const colors = {
+        30: "rgba(0,0,255,1.0)",     // blue (pair with 12)
+        20: "rgba(255,255,0,1.0)",   // yellow (pair with 2)
+        15: "rgba(255,0,0,1.0)",     // red (pair with 6)
+        12: "rgba(0,0,255,1.0)",     // blue (pair with 30)
+        6:  "rgba(255,0,0,1.0)",     // red (pair with 15)
+        4:  "rgba(30,30,30,1.0)",    // black (pair with 1)
+        2:  "rgba(255,255,0,1.0)",   // yellow (pair with 20)
+        1:  "rgba(30,30,30,1.0)"     // black (pair with 4)
+    };
+
+    // Build ordering by SUM (0-90)
+    const orderingBySum = {};
+    const comboCountBySum = new Array(TOTAL_SUM + 1).fill(0);
+
+    for (let mask = 0; mask < 256; mask++) {
+        const cells = [];
+        let sum = 0;
+        for (let i = 0; i < 8; i++) {
+            if (mask & (1 << i)) {
+                cells.push(CELLS[i]);
+                sum += CELLS[i];
+            }
+        }
+        if (!orderingBySum[sum]) orderingBySum[sum] = [];
+        orderingBySum[sum].push(cells);
+        comboCountBySum[sum]++;
+    }
+
+    // Triangle wave
+    const WAVE_PERIOD = 2 * TOTAL_SUM; // 180 frames per cycle
+
+    function waveSum(frame) {
+        const t = frame % WAVE_PERIOD;
+        return TOTAL_SUM - Math.abs(TOTAL_SUM - t);
+    }
+
+    // Calculate total combinations per cycle
+    let totalCombosPerCycle = 1n;
+    for (let i = 0; i < WAVE_PERIOD; i++) {
+        totalCombosPerCycle *= BigInt(comboCountBySum[waveSum(i)]);
+    }
+
+    // Find largest power of 10 that cleanly divides total
+    // Since 10^k = 2^k × 5^k, and total = 2^108 × 3^44 × 5^24,
+    // k is limited by the 5^24 factor, so max k = 24
+    function findMaxPowerOf10(total) {
+        // Count factors of 2 and 5 in the combo counts
+        // From CAPACITY FACTORIZATION comment: 2^108 and 5^24
+        // So max k = min(108, 24) = 24
+        const k = 24;  // Limited by 5^24
+        let power = 1n;
+        for (let i = 0; i < k; i++) power *= 10n;
+        return { k, power };
+    }
+
+    const { k: PERIOD_DIGITS, power: PERIOD } = findMaxPowerOf10(totalCombosPerCycle);
+    const MSG_CAPACITY_PER_CYCLE = totalCombosPerCycle / PERIOD;
+
+    console.log(`Total combinations per cycle: ${totalCombosPerCycle}`);
+    console.log(`Period: 10^${PERIOD_DIGITS} = ${PERIOD}`);
+    console.log(`Message capacity per cycle: ${MSG_CAPACITY_PER_CYCLE}`);
+    console.log(`Message bits per cycle: ${Math.log2(Number(MSG_CAPACITY_PER_CYCLE)).toFixed(2)}`);
+
+    // Update stats display
+    document.getElementById('periodInfo').textContent = `10^${PERIOD_DIGITS}`;
+    const msgBitsPerCycle = Math.log2(Number(MSG_CAPACITY_PER_CYCLE));
+    const msgBitsPerFrame = msgBitsPerCycle / WAVE_PERIOD;
+    document.getElementById('msgCapacity').textContent =
+        `~${msgBitsPerFrame.toFixed(2)} bits/frame (${msgBitsPerCycle.toFixed(1)} bits/cycle)`;
+
+    // State
+    let globalFrame = 0n;  // Absolute frame counter (never wraps in practice)
+    let messageValue = 0n; // Message encoded as BigInt
+    let intervalId = null;
+    let speed = 1000;
+
+    // Parse URL parameters
+    const params = new URLSearchParams(window.location.search);
+    const initialMessage = params.get('msg') || params.get('message') || "Hi";
+    const initialSpeed = parseInt(params.get('speed')) || 1000;
+    const initialFrame = BigInt(params.get('frame') || '0');
+    const hideControls = params.get('controls') === '0';
+
+    // Draw wave indicator background
+    function drawWaveBackground() {
+        const canvas = document.getElementById('wavePath');
+        const container = document.getElementById('waveIndicator');
+        canvas.width = container.offsetWidth;
+        canvas.height = container.offsetHeight;
+        const ctx = canvas.getContext('2d');
+
+        ctx.strokeStyle = '#999';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+
+        for (let i = 0; i < WAVE_PERIOD; i++) {
+            const x = (i / WAVE_PERIOD) * canvas.width;
+            const y = canvas.height - (waveSum(i) / TOTAL_SUM) * canvas.height;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    // Convert string to BigInt
+    function stringToBigInt(str) {
+        const bytes = new TextEncoder().encode(str);
+        let n = 0n;
+        for (const b of bytes) {
+            n = (n << 8n) | BigInt(b);
+        }
+        return n;
+    }
+
+    // Encode frame: given absolute frame number and message, compute cell pattern
+    function encodeFrame(frameNum, msgValue) {
+        const cycleNum = frameNum / BigInt(WAVE_PERIOD);
+        const posInCycle = Number(frameNum % BigInt(WAVE_PERIOD));
+
+        // Combined value for this cycle: (cycleNum mod PERIOD) * MSG_CAPACITY + (msgValue mod MSG_CAPACITY)
+        const cycleIndex = cycleNum % PERIOD;
+        const msgForCycle = msgValue % MSG_CAPACITY_PER_CYCLE;
+        let combined = cycleIndex * MSG_CAPACITY_PER_CYCLE + msgForCycle;
+
+        // Decode combined value into per-frame choices using mixed-radix
+        // We need to extract the choice for position posInCycle
+        const choices = [];
+        for (let i = 0; i < WAVE_PERIOD; i++) {
+            const sum = waveSum(i);
+            const count = BigInt(comboCountBySum[sum]);
+            choices.push(Number(combined % count));
+            combined = combined / count;
+        }
+
+        const sum = waveSum(posInCycle);
+        const comboIndex = choices[posInCycle];
+        const cells = orderingBySum[sum][comboIndex];
+
+        return { sum, comboIndex, cells, cycleIndex, posInCycle };
+    }
+
+    // Display a frame
+    function displayFrame(data) {
+        const { cells } = data;
+
+        for (const cellWeight of CELLS) {
+            const el = document.getElementById('c' + cellWeight);
+            const visible = cells.includes(cellWeight);
+            el.style.opacity = visible ? "100%" : "0%";
+            el.style.backgroundColor = colors[cellWeight];
+        }
+    }
+
+    // Update info display
+    function updateInfo(data) {
+        const { sum, comboIndex, cells, cycleIndex, posInCycle } = data;
+        const cellsStr = cells.length > 0 ? cells.join('+') : '(none)';
+        const combosForSum = comboCountBySum[sum];
+        const rising = posInCycle <= TOTAL_SUM;
+        const direction = rising ? '↗' : '↘';
+
+        document.getElementById('info').innerHTML =
+            `Cycle: ${cycleIndex} / 10^${PERIOD_DIGITS} | ` +
+            `Pos: ${posInCycle}/${WAVE_PERIOD} | ` +
+            `Sum: <b>${sum}</b> ${direction} | ` +
+            `Combo: ${comboIndex + 1}/${combosForSum} | ` +
+            `Cells: [${cellsStr}]`;
+
+        // Update cycle counter display (no leading zeros, show period)
+        document.getElementById('frameCounter').textContent = `Cycle: ${cycleIndex} / 10^${PERIOD_DIGITS}`;
+
+        // Update wave position
+        const wavePos = (posInCycle / WAVE_PERIOD) * 100;
+        document.getElementById('wavePosition').style.left = wavePos + '%';
+
+        // Update progress (within current message cycle)
+        const msgCycleLen = WAVE_PERIOD;
+        const progress = ((posInCycle + 1) / msgCycleLen) * 100;
+        document.getElementById('progressBar').style.width = progress + '%';
+    }
+
+    // Animation step
+    function step() {
+        const data = encodeFrame(globalFrame, messageValue);
+        displayFrame(data);
+        updateInfo(data);
+        globalFrame++;
+    }
+
+    // Set message
+    function setMessage() {
+        const input = document.getElementById('message').value;
+        messageValue = stringToBigInt(input);
+
+        const bytes = new TextEncoder().encode(input);
+        document.getElementById('msgInfo').textContent =
+            `"${input.substring(0, 15)}${input.length > 15 ? '...' : ''}" = ${bytes.length} bytes`;
+
+        // Update URL
+        const url = new URL(window.location);
+        url.searchParams.set('msg', input);
+        window.history.replaceState({}, '', url);
+    }
+
+    // Update speed
+    function updateSpeed() {
+        speed = parseInt(document.getElementById('speed').value);
+        document.getElementById('speedLabel').textContent = speed;
+
+        if (intervalId) clearInterval(intervalId);
+        intervalId = setInterval(step, speed);
+
+        const url = new URL(window.location);
+        url.searchParams.set('speed', speed);
+        window.history.replaceState({}, '', url);
+    }
+
+    // Toggle controls
+    function toggleControls() {
+        const show = document.getElementById('showControls').checked;
+        document.getElementById('controls').className = show ? '' : 'hidden';
+    }
+
+    // Initialize
+    document.getElementById('message').value = initialMessage;
+    document.getElementById('speed').value = initialSpeed;
+    document.getElementById('speedLabel').textContent = initialSpeed;
+    speed = initialSpeed;
+    globalFrame = initialFrame;
+
+    if (hideControls) {
+        document.getElementById('showControls').checked = false;
+        document.getElementById('controls').className = 'hidden';
+    }
+
+    // Draw wave background after layout
+    setTimeout(drawWaveBackground, 100);
+    window.addEventListener('resize', drawWaveBackground);
+
+    // Initial message and display
+    setMessage();
+    step();
+    intervalId = setInterval(step, speed);
+
+    // Keyboard: Space to pause
+    document.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+            e.preventDefault();
+            if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
+                document.getElementById('info').innerHTML += ' <b>[PAUSED - Space to resume]</b>';
+            } else {
+                intervalId = setInterval(step, speed);
+            }
+        }
+    });
+
+    /*
+     * CAPACITY FACTORIZATION:
+     *
+     * Combo counts per sum are only {1, 2, 3, 4, 5}, appearing in wave as:
+     *   1 × 42 times, 2 × 32 times, 3 × 44 times, 4 × 38 times, 5 × 24 times
+     *
+     * Total combinations per cycle = 2^108 × 3^44 × 5^24
+     *                              = 4^54 × 3^44 × 5^24
+     *                              ≈ 1.9 × 10^70
+     *
+     * For power-of-10 period: 10^k = 2^k × 5^k
+     *   Limited by 5^24, so max k = 24
+     *   Period = 10^24 cycles ≈ 3 × 10^24 minutes ≈ 5.7 × 10^18 years
+     *   Message capacity = 2^84 × 3^44 per cycle ≈ 1.9 × 10^46 values
+     */
+
+    /*
+     * DECODING:
+     *
+     * To decode from observed frames:
+     * 1. Observe 2+ consecutive frames to determine direction (rising/falling)
+     * 2. From sum and direction, compute posInCycle:
+     *    - rising:  posInCycle = sum
+     *    - falling: posInCycle = WAVE_PERIOD - sum
+     * 3. Collect all 180 frames of a cycle
+     * 4. For each frame, find comboIndex by matching cells to orderingBySum[sum]
+     * 5. Reconstruct 'combined' using mixed-radix (multiply and add)
+     * 6. Extract: cycleIndex = combined / MSG_CAPACITY_PER_CYCLE
+     *             msgValue = combined % MSG_CAPACITY_PER_CYCLE
+     * 7. Absolute time = cycleIndex * 180 frames (mod 10^PERIOD_DIGITS cycles)
+     *
+     * Period = 10^PERIOD_DIGITS cycles = 10^PERIOD_DIGITS * 180 frames
+     * At 1 frame/second: ~10^PERIOD_DIGITS * 3 minutes before wrap
+     */
+</script>
+</body>
+</html>

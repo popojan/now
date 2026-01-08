@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="shortcut icon" href="/favicon.png" type="image/x-icon" />
+    <title>Snow8-Clock - 8-bit Mondrian Clock with Signature Encoding</title>
+    <style>
+        body { background-color: #DDDDDD; }
+        tr { height: 10%; padding: 0; margin: 0;}
+        td { border: 1vh solid #303030; text-align: center; vertical-align: center; padding:0; margin:0;}
+        table {
+            border-collapse: collapse;
+            table-layout: fixed;
+            width: 54vh;  /* 9 columns */
+            height: 60vh; /* 10 rows */
+            margin: 0;
+            padding: 0;
+            color: rgba(0,0,0,0.5);
+            font-family: sans-serif;
+            font-weight: bold;
+            font-size: 250%;
+            box-shadow: 1vh 1vh 2vh #A0A0A0;
+            background-color: #FFFFFF;
+        }
+        .center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 10px;
+        }
+        #info {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #666;
+            max-width: 90%;
+            background: rgba(255,255,255,0.9);
+            padding: 8px;
+            border-radius: 4px;
+        }
+        #controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            font-family: sans-serif;
+            font-size: 14px;
+            background: rgba(255,255,255,0.95);
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            max-width: 400px;
+        }
+        #controls input[type="text"] {
+            width: 120px;
+            padding: 5px;
+            font-family: monospace;
+        }
+        #controls button {
+            padding: 5px 15px;
+            margin-left: 5px;
+            cursor: pointer;
+        }
+        #controls label {
+            display: block;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #666;
+        }
+        .hidden { display: none; }
+        .stats {
+            margin-top: 10px;
+            padding: 8px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: monospace;
+            line-height: 1.4;
+        }
+        .highlight { color: #d32f2f; font-weight: bold; }
+        .period { color: #1976d2; font-weight: bold; }
+        #minuteCounter {
+            font-size: 16px;
+            font-family: monospace;
+            padding: 10px;
+            background: #222;
+            color: #0f0;
+            border-radius: 4px;
+            margin-top: 10px;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+        #secondBar {
+            width: 100%;
+            height: 4px;
+            background: #ddd;
+            margin-top: 8px;
+            border-radius: 2px;
+        }
+        #secondProgress {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            border-radius: 2px;
+            transition: width 0.05s;
+        }
+        .param-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .param-row label {
+            margin: 0;
+            min-width: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="center">
+        <!-- Grid: 10 rows × 9 columns -->
+        <table>
+            <tr>
+                <td id="c15" rowspan="5" colspan="3"></td>
+                <td id="c30" rowspan="5" colspan="6"></td>
+            </tr>
+            <tr></tr>
+            <tr></tr>
+            <tr></tr>
+            <tr></tr>
+            <tr>
+                <td id="c20" rowspan="5" colspan="4"></td>
+                <td id="c1" rowspan="1" colspan="1"></td>
+                <td id="c2" rowspan="1" colspan="2"></td>
+                <td id="c4" rowspan="2" colspan="2"></td>
+            </tr>
+            <tr>
+                <td id="c12" rowspan="4" colspan="3"></td>
+            </tr>
+            <tr>
+                <td id="c6" rowspan="3" colspan="2"></td>
+            </tr>
+            <tr></tr>
+            <tr></tr>
+        </table>
+    </div>
+    <div id="controls">
+        <div>Signature Encoding</div>
+        <div class="param-row">
+            <label>P:</label>
+            <input type="text" id="paramP" placeholder="Period (coprime 60)" value="1">
+            <label>N:</label>
+            <input type="text" id="paramN" placeholder="Value" value="0">
+            <button onclick="setParams()">Set</button>
+        </div>
+        <div id="minuteCounter">Minute: 0</div>
+        <div id="secondBar"><div id="secondProgress"></div></div>
+        <label>
+            <input type="checkbox" id="showControls" checked onchange="toggleControls()"> Show controls
+        </label>
+        <div class="stats">
+            <div>Cells: {1,2,4,6,12,15,20,30} sum=90</div>
+            <div>Combos per second: 3-5 (mod 60)</div>
+            <div>Period: <span class="period">2^30 × 3^16</span> minutes</div>
+            <div>≈ 88 billion years (6× age of universe)</div>
+            <div>Entropy: <span class="highlight">7.98 bits/second</span> (99.8%)</div>
+            <div id="eraInfo"></div>
+        </div>
+    </div>
+    <div id="info"></div>
+<script type="text/javascript">
+    // Cell weights
+    const CELLS = [1, 2, 4, 6, 12, 15, 20, 30];
+
+    // 4 colors, each used exactly twice, no adjacent cells share color
+    const colors = {
+        30: "rgba(0,0,255,1.0)",     // blue (pair with 12)
+        20: "rgba(255,255,0,1.0)",   // yellow (pair with 2)
+        15: "rgba(255,0,0,1.0)",     // red (pair with 6)
+        12: "rgba(0,0,255,1.0)",     // blue (pair with 30)
+        6:  "rgba(255,0,0,1.0)",     // red (pair with 15)
+        4:  "rgba(30,30,30,1.0)",    // black (pair with 1)
+        2:  "rgba(255,255,0,1.0)",   // yellow (pair with 20)
+        1:  "rgba(30,30,30,1.0)"     // black (pair with 4)
+    };
+
+    // 8-cell ordering: 256 total combinations, 3-5 per second (sum mod 60)
+    const ordering = {
+        0: [[], [4, 6, 20, 30], [1, 2, 12, 15, 30], [1, 2, 4, 6, 12, 15, 20]],
+        1: [[1], [4, 12, 15, 30], [1, 4, 6, 20, 30]],
+        2: [[2], [12, 20, 30], [1, 4, 12, 15, 30], [2, 4, 6, 20, 30]],
+        3: [[1, 2], [1, 12, 20, 30], [6, 12, 15, 30], [2, 4, 12, 15, 30], [1, 2, 4, 6, 20, 30]],
+        4: [[4], [2, 12, 20, 30], [1, 6, 12, 15, 30], [1, 2, 4, 12, 15, 30]],
+        5: [[1, 4], [15, 20, 30], [1, 2, 12, 20, 30], [2, 6, 12, 15, 30]],
+        6: [[6], [2, 4], [1, 15, 20, 30], [4, 12, 20, 30], [1, 2, 6, 12, 15, 30]],
+        7: [[1, 6], [1, 2, 4], [2, 15, 20, 30], [1, 4, 12, 20, 30], [4, 6, 12, 15, 30]],
+        8: [[2, 6], [6, 12, 20, 30], [1, 2, 15, 20, 30], [2, 4, 12, 20, 30], [1, 4, 6, 12, 15, 30]],
+        9: [[1, 2, 6], [4, 15, 20, 30], [1, 6, 12, 20, 30], [1, 2, 4, 12, 20, 30], [2, 4, 6, 12, 15, 30]],
+        10: [[4, 6], [1, 4, 15, 20, 30], [2, 6, 12, 20, 30], [1, 2, 4, 6, 12, 15, 30]],
+        11: [[1, 4, 6], [6, 15, 20, 30], [2, 4, 15, 20, 30], [1, 2, 6, 12, 20, 30]],
+        12: [[12], [2, 4, 6], [1, 6, 15, 20, 30], [4, 6, 12, 20, 30], [1, 2, 4, 15, 20, 30]],
+        13: [[1, 12], [1, 2, 4, 6], [2, 6, 15, 20, 30], [1, 4, 6, 12, 20, 30]],
+        14: [[2, 12], [1, 2, 6, 15, 20, 30], [2, 4, 6, 12, 20, 30]],
+        15: [[15], [1, 2, 12], [4, 6, 15, 20, 30], [1, 2, 4, 6, 12, 20, 30]],
+        16: [[1, 15], [4, 12], [1, 4, 6, 15, 20, 30]],
+        17: [[2, 15], [1, 4, 12], [12, 15, 20, 30], [2, 4, 6, 15, 20, 30]],
+        18: [[6, 12], [1, 2, 15], [2, 4, 12], [1, 12, 15, 20, 30], [1, 2, 4, 6, 15, 20, 30]],
+        19: [[4, 15], [1, 6, 12], [1, 2, 4, 12], [2, 12, 15, 20, 30]],
+        20: [[20], [1, 4, 15], [2, 6, 12], [1, 2, 12, 15, 20, 30]],
+        21: [[1, 20], [6, 15], [2, 4, 15], [1, 2, 6, 12], [4, 12, 15, 20, 30]],
+        22: [[2, 20], [1, 6, 15], [4, 6, 12], [1, 2, 4, 15], [1, 4, 12, 15, 20, 30]],
+        23: [[1, 2, 20], [2, 6, 15], [1, 4, 6, 12], [6, 12, 15, 20, 30], [2, 4, 12, 15, 20, 30]],
+        24: [[4, 20], [1, 2, 6, 15], [2, 4, 6, 12], [1, 6, 12, 15, 20, 30], [1, 2, 4, 12, 15, 20, 30]],
+        25: [[1, 4, 20], [4, 6, 15], [1, 2, 4, 6, 12], [2, 6, 12, 15, 20, 30]],
+        26: [[6, 20], [2, 4, 20], [1, 4, 6, 15], [1, 2, 6, 12, 15, 20, 30]],
+        27: [[12, 15], [1, 6, 20], [1, 2, 4, 20], [2, 4, 6, 15], [4, 6, 12, 15, 20, 30]],
+        28: [[1, 12, 15], [2, 6, 20], [1, 2, 4, 6, 15], [1, 4, 6, 12, 15, 20, 30]],
+        29: [[2, 12, 15], [1, 2, 6, 20], [2, 4, 6, 12, 15, 20, 30]],
+        30: [[30], [4, 6, 20], [1, 2, 12, 15], [1, 2, 4, 6, 12, 15, 20, 30]],
+        31: [[1, 30], [4, 12, 15], [1, 4, 6, 20]],
+        32: [[2, 30], [12, 20], [1, 4, 12, 15], [2, 4, 6, 20]],
+        33: [[1, 2, 30], [1, 12, 20], [6, 12, 15], [2, 4, 12, 15], [1, 2, 4, 6, 20]],
+        34: [[4, 30], [2, 12, 20], [1, 6, 12, 15], [1, 2, 4, 12, 15]],
+        35: [[15, 20], [1, 4, 30], [1, 2, 12, 20], [2, 6, 12, 15]],
+        36: [[6, 30], [1, 15, 20], [2, 4, 30], [4, 12, 20], [1, 2, 6, 12, 15]],
+        37: [[1, 6, 30], [2, 15, 20], [1, 2, 4, 30], [1, 4, 12, 20], [4, 6, 12, 15]],
+        38: [[2, 6, 30], [6, 12, 20], [1, 2, 15, 20], [2, 4, 12, 20], [1, 4, 6, 12, 15]],
+        39: [[4, 15, 20], [1, 2, 6, 30], [1, 6, 12, 20], [1, 2, 4, 12, 20], [2, 4, 6, 12, 15]],
+        40: [[4, 6, 30], [1, 4, 15, 20], [2, 6, 12, 20], [1, 2, 4, 6, 12, 15]],
+        41: [[6, 15, 20], [1, 4, 6, 30], [2, 4, 15, 20], [1, 2, 6, 12, 20]],
+        42: [[12, 30], [1, 6, 15, 20], [2, 4, 6, 30], [4, 6, 12, 20], [1, 2, 4, 15, 20]],
+        43: [[1, 12, 30], [2, 6, 15, 20], [1, 2, 4, 6, 30], [1, 4, 6, 12, 20]],
+        44: [[2, 12, 30], [1, 2, 6, 15, 20], [2, 4, 6, 12, 20]],
+        45: [[15, 30], [1, 2, 12, 30], [4, 6, 15, 20], [1, 2, 4, 6, 12, 20]],
+        46: [[1, 15, 30], [4, 12, 30], [1, 4, 6, 15, 20]],
+        47: [[2, 15, 30], [12, 15, 20], [1, 4, 12, 30], [2, 4, 6, 15, 20]],
+        48: [[6, 12, 30], [1, 2, 15, 30], [1, 12, 15, 20], [2, 4, 12, 30], [1, 2, 4, 6, 15, 20]],
+        49: [[4, 15, 30], [1, 6, 12, 30], [2, 12, 15, 20], [1, 2, 4, 12, 30]],
+        50: [[20, 30], [1, 4, 15, 30], [2, 6, 12, 30], [1, 2, 12, 15, 20]],
+        51: [[1, 20, 30], [6, 15, 30], [2, 4, 15, 30], [4, 12, 15, 20], [1, 2, 6, 12, 30]],
+        52: [[2, 20, 30], [1, 6, 15, 30], [4, 6, 12, 30], [1, 2, 4, 15, 30], [1, 4, 12, 15, 20]],
+        53: [[1, 2, 20, 30], [2, 6, 15, 30], [6, 12, 15, 20], [1, 4, 6, 12, 30], [2, 4, 12, 15, 20]],
+        54: [[4, 20, 30], [1, 2, 6, 15, 30], [1, 6, 12, 15, 20], [2, 4, 6, 12, 30], [1, 2, 4, 12, 15, 20]],
+        55: [[1, 4, 20, 30], [4, 6, 15, 30], [2, 6, 12, 15, 20], [1, 2, 4, 6, 12, 30]],
+        56: [[6, 20, 30], [2, 4, 20, 30], [1, 4, 6, 15, 30], [1, 2, 6, 12, 15, 20]],
+        57: [[12, 15, 30], [1, 6, 20, 30], [1, 2, 4, 20, 30], [2, 4, 6, 15, 30], [4, 6, 12, 15, 20]],
+        58: [[1, 12, 15, 30], [2, 6, 20, 30], [1, 2, 4, 6, 15, 30], [1, 4, 6, 12, 15, 20]],
+        59: [[2, 12, 15, 30], [1, 2, 6, 20, 30], [2, 4, 6, 12, 15, 20]],
+    };
+
+    // Period: 2^30 × 3^16 minutes ≈ 88 billion years
+    const CLOCK_PERIOD = 46221064723759104n;
+
+    // Signature parameters (coprime with 60)
+    let sigP = 1n;  // Period divisor (must be coprime with 60)
+    let sigN = 0n;  // Signature value (0 to P-1)
+
+    // Parse URL parameters
+    const params = new URLSearchParams(window.location.search);
+    const origin = new Date(params.get('origin') || "1970-01-01T00:00:00Z");
+    const initialP = params.get('P') || params.get('p') || "1";
+    const initialN = params.get('N') || params.get('n') || "0";
+    const hideControls = params.get('controls') === '0';
+
+    // Check if P is coprime with 60
+    function gcd(a, b) {
+        a = a < 0n ? -a : a;
+        b = b < 0n ? -b : b;
+        while (b > 0n) { const t = b; b = a % b; a = t; }
+        return a;
+    }
+
+    function isCoprime60(p) {
+        return gcd(p, 60n) === 1n;
+    }
+
+    // Permutation function with signature encoding
+    // For minute m, signature value N, period P:
+    // k = (m + N * (CLOCK_PERIOD / P)) mod CLOCK_PERIOD
+    function perm(minute, P, N) {
+        let k;
+        if (P <= 1n) {
+            k = minute % CLOCK_PERIOD;
+        } else {
+            // Era length in minutes
+            const eraLen = CLOCK_PERIOD / P;
+            // Offset for this signature value
+            const offset = (N % P) * eraLen;
+            k = (minute + offset) % CLOCK_PERIOD;
+        }
+
+        // Convert to combo indices
+        let ret = [];
+        let kNum = Number(k % 1000000007n);
+        for (let i = 0; i < 60; ++i) {
+            let m = ordering[i].length;
+            let selector = (kNum + i * 17 + (kNum >> (i % 20))) % m;
+            ret.push(Math.floor(selector) % m);
+        }
+        return ret;
+    }
+
+    function setParams() {
+        const pVal = document.getElementById('paramP').value;
+        const nVal = document.getElementById('paramN').value;
+
+        try {
+            const newP = BigInt(pVal);
+            const newN = BigInt(nVal);
+
+            if (newP < 1n) {
+                alert('P must be >= 1');
+                return;
+            }
+            if (!isCoprime60(newP)) {
+                alert('P must be coprime with 60 (no factors of 2, 3, or 5)');
+                return;
+            }
+            if (newN < 0n || newN >= newP) {
+                alert(`N must be in range [0, ${newP - 1n}]`);
+                return;
+            }
+
+            sigP = newP;
+            sigN = newN;
+
+            // Update URL
+            const url = new URL(window.location);
+            url.searchParams.set('P', pVal);
+            url.searchParams.set('N', nVal);
+            window.history.replaceState({}, '', url);
+
+            updateEraInfo();
+        } catch (e) {
+            alert('Invalid number format');
+        }
+    }
+
+    function updateEraInfo() {
+        const eraInfo = document.getElementById('eraInfo');
+        if (sigP <= 1n) {
+            eraInfo.textContent = 'Signature: disabled (P=1)';
+        } else {
+            const eraMinutes = CLOCK_PERIOD / sigP;
+            const eraYears = Number(eraMinutes) / (60 * 24 * 365.25);
+            let eraStr;
+            if (eraYears >= 1e9) {
+                eraStr = (eraYears / 1e9).toFixed(1) + ' billion years';
+            } else if (eraYears >= 1e6) {
+                eraStr = (eraYears / 1e6).toFixed(1) + ' million years';
+            } else if (eraYears >= 1000) {
+                eraStr = (eraYears / 1000).toFixed(1) + ' thousand years';
+            } else {
+                eraStr = eraYears.toFixed(1) + ' years';
+            }
+            eraInfo.innerHTML = `Signature: P=<span class="highlight">${sigP}</span> N=${sigN}<br>Era length: ${eraStr}`;
+        }
+    }
+
+    function toggleControls() {
+        const show = document.getElementById('showControls').checked;
+        document.getElementById('controls').className = show ? '' : 'hidden';
+    }
+
+    // Initialize
+    document.getElementById('paramP').value = initialP;
+    document.getElementById('paramN').value = initialN;
+
+    try {
+        sigP = BigInt(initialP);
+        sigN = BigInt(initialN);
+        if (!isCoprime60(sigP)) sigP = 1n;
+        if (sigN >= sigP) sigN = 0n;
+    } catch (e) {
+        sigP = 1n;
+        sigN = 0n;
+    }
+
+    if (hideControls) {
+        document.getElementById('showControls').checked = false;
+        document.getElementById('controls').className = 'hidden';
+    }
+
+    updateEraInfo();
+
+    // Main loop
+    setInterval(function() {
+        const now = Date.now();
+        const t = BigInt(Math.floor((now - origin) / 1000));
+        const currentSecond = Number(t % 60n);
+        const minute = t / 60n;
+
+        const tt = perm(minute, sigP, sigN);
+        const cells = ordering[currentSecond][tt[currentSecond]];
+
+        // Update all 8 cells
+        for (const cellWeight of CELLS) {
+            const el = document.getElementById('c' + cellWeight);
+            const visible = cells.includes(cellWeight);
+            el.style.opacity = visible ? "100%" : "0%";
+            el.style.backgroundColor = colors[cellWeight];
+        }
+
+        // Update minute counter
+        document.getElementById('minuteCounter').textContent =
+            `Minute: ${minute} | Second: ${currentSecond}`;
+
+        // Update second progress bar
+        document.getElementById('secondProgress').style.width =
+            ((currentSecond + 1) / 60 * 100) + '%';
+
+        // Update info
+        const mask = (cells.includes(1) ? 1 : 0) |
+                    (cells.includes(2) ? 2 : 0) |
+                    (cells.includes(4) ? 4 : 0) |
+                    (cells.includes(6) ? 8 : 0) |
+                    (cells.includes(12) ? 16 : 0) |
+                    (cells.includes(15) ? 32 : 0) |
+                    (cells.includes(20) ? 64 : 0) |
+                    (cells.includes(30) ? 128 : 0);
+        const sum = cells.reduce((a, b) => a + b, 0);
+        const combosForSecond = ordering[currentSecond].length;
+
+        document.getElementById('info').innerHTML =
+            `Second: <b>${currentSecond}</b> | ` +
+            `Sum: ${sum} (mod 60 = ${sum % 60}) | ` +
+            `Combo: ${tt[currentSecond] + 1}/${combosForSecond} | ` +
+            `Mask: 0x${mask.toString(16).padStart(2,'0')} | ` +
+            `Cells: [${cells.length > 0 ? cells.join('+') : 'none'}]`;
+
+    }, 50);
+
+    // Keyboard: Space to toggle controls
+    document.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+            e.preventDefault();
+            const checkbox = document.getElementById('showControls');
+            checkbox.checked = !checkbox.checked;
+            toggleControls();
+        }
+    });
+</script>
+</body>
+</html>
