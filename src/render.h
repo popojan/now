@@ -13,16 +13,21 @@
 #include <stdint.h>
 #include <stdio.h>
 
-/* Grid layout: 6 columns x 10 rows
+/* Grid layout: 6 columns x 10 rows (7-cell mode)
  * Each cell contains the cell value (1,2,4,6,12,15,20) that owns it */
 extern const int GRID[10][6];
+
+/* Grid layout: 9 columns x 10 rows (8-cell mode with cell 30)
+ * Cell values: 1,2,4,6,12,15,20,30 */
+extern const int GRID8[10][9];
 
 /* Render options */
 typedef struct {
     int ascii;          /* 0=Unicode borders, 1=ASCII borders */
     int half_width;     /* 0=normal (2 cols/cell), 1=compact (1 col/cell) */
     int wide_fills;     /* 0=doubled fills, 1=wide chars (CJK/emoji) */
-    const char *fills;  /* Custom 7 UTF-8 chars for cells 1,2,4,6,12,15,20, or NULL */
+    int mode8;          /* 0=7-cell (6 cols), 1=8-cell (9 cols, includes cell 30) */
+    const char *fills;  /* Custom 7/8 UTF-8 chars for cells, or NULL */
     const char *preset; /* Preset name, or NULL for default */
 } render_opts_t;
 

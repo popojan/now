@@ -980,10 +980,9 @@ int main(int argc, char **argv) {
     }
 
 
-    /* 8-bit mode requires numeric output (visual only shows 7 cells) */
-    if (mode8 && !bits_mode && !decimal_mode && !raw_mode && !inverse) {
-        fprintf(stderr, "Warning: -8 mode requires -b, -d, or -r for output (visual only shows 7 cells)\n");
-        fprintf(stderr, "         Cell 30 will not be displayed. Use -d for decimal output.\n");
+    /* 8-bit mode uses 9-column grid for visual output */
+    if (mode8) {
+        render.mode8 = 1;
     }
 
     /* Validate signature value */
