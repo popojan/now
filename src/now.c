@@ -79,7 +79,9 @@ static void usage(const char *prog) {
     printf("  -W [a,b,c]  Wave mode: triangle wave 0→90→0 with period 2^a × 3^b × 5^c\n");
     printf("              Default: half split (54,22,12) ~117 bits each for period and message\n");
     printf("  -M VALUE    Message value to encode in wave mode (default: 0)\n");
-    printf("  -n N        Output N frames then exit\n\n");
+    printf("  -n N        Output N frames then exit\n");
+    printf("  --mask N    Display a specific mask value (decimal) and exit\n");
+    printf("  --sum S     Show all masks that sum to S and exit\n\n");
     printf("Display:\n");
     printf("  -a          ASCII borders\n");
     printf("  -p PRESET   Preset: cjk (default), blocks, blocks1, distinct, kanji, emoji\n");
@@ -890,6 +892,8 @@ int main(int argc, char **argv) {
     wave_period_t wave_period = {0, 0, 0};
     uint128_t wave_msg = U128_ZERO;
     int64_t num_frames = -1, start_t = -1;
+    int show_mask = -1;  /* --mask N: just display this mask and exit */
+    int show_sum = -1;   /* --sum S: show all masks with this sum */
     time_t origin = 0;
     int n_specified = 0;  /* Track if -N was explicitly provided */
     const char *p_str = NULL, *n_str = NULL;  /* Store -P/-N strings for later parsing */
@@ -951,6 +955,10 @@ int main(int argc, char **argv) {
             start_t = atoll(argv[++i]);
         else if (strcmp(argv[i], "-n") == 0 && i+1 < argc)
             num_frames = atoll(argv[++i]);
+        else if (strcmp(argv[i], "--mask") == 0 && i+1 < argc)
+            show_mask = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--sum") == 0 && i+1 < argc)
+            show_sum = atoi(argv[++i]);
         else if (strcmp(argv[i], "-P") == 0 && i+1 < argc) {
             p_str = argv[++i];
         }
@@ -983,6 +991,84 @@ int main(int argc, char **argv) {
     /* 8-bit mode uses 9-column grid for visual output */
     if (mode8) {
         render.mode8 = 1;
+    }
+
+    /* --mask N: just display this mask and exit */
+    if (show_mask >= 0) {
+        uint8_t mask = (uint8_t)show_mask;
+        if (bits_mode) {
+            int bits = mode8 ? 8 : 7;
+            for (int b = bits - 1; b >= 0; b--)
+                putchar((mask & (1 << b)) ? '1' : '0');
+            putchar('\n');
+        } else if (decimal_mode) {
+            printf("%d\n", mask);
+        } else if (raw_mode) {
+            putchar(mask);
+        } else {
+            /* Show cell breakdown */
+            const int cells8[] = {1, 2, 4, 6, 12, 15, 20, 30};
+            const int cells7[] = {1, 2, 4, 6, 12, 15, 20};
+            const int *cells = mode8 ? cells8 : cells7;
+            int ncells = mode8 ? 8 : 7;
+            int sum = 0;
+            fprintf(stderr, "mask=%d cells=", mask);
+            int first = 1;
+            for (int i = 0; i < ncells; i++) {
+                if (mask & (1 << i)) {
+                    fprintf(stderr, "%s%d", first ? "" : "+", cells[i]);
+                    sum += cells[i];
+                    first = 0;
+                }
+            }
+            fprintf(stderr, " sum=%d\n", sum);
+            render_mask(mask, &render, stdout);
+        }
+        return 0;
+    }
+
+    /* --sum S: show all masks that produce this sum */
+    if (show_sum >= 0) {
+        const int cells8[] = {1, 2, 4, 6, 12, 15, 20, 30};
+        const int cells7[] = {1, 2, 4, 6, 12, 15, 20};
+        const int *cells = mode8 ? cells8 : cells7;
+        int ncells = mode8 ? 8 : 7;
+        int max_mask = mode8 ? 256 : 128;
+        int count = 0;
+
+        for (int mask = 0; mask < max_mask; mask++) {
+            int sum = 0;
+            for (int i = 0; i < ncells; i++)
+                if (mask & (1 << i)) sum += cells[i];
+            if (sum != show_sum) continue;
+
+            count++;
+            if (bits_mode) {
+                for (int b = ncells - 1; b >= 0; b--)
+                    putchar((mask & (1 << b)) ? '1' : '0');
+                putchar('\n');
+            } else if (decimal_mode) {
+                printf("%d\n", mask);
+            } else if (raw_mode) {
+                putchar(mask);
+            } else {
+                fprintf(stderr, "mask=%d cells=", mask);
+                int first = 1;
+                for (int i = 0; i < ncells; i++) {
+                    if (mask & (1 << i)) {
+                        fprintf(stderr, "%s%d", first ? "" : "+", cells[i]);
+                        first = 0;
+                    }
+                }
+                fprintf(stderr, "\n");
+                render_mask((uint8_t)mask, &render, stdout);
+            }
+        }
+        if (count == 0)
+            fprintf(stderr, "No combinations sum to %d\n", show_sum);
+        else if (!bits_mode && !decimal_mode && !raw_mode)
+            fprintf(stderr, "%d combination(s) for sum=%d\n", count, show_sum);
+        return 0;
     }
 
     /* Validate signature value */
