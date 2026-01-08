@@ -310,18 +310,6 @@
         window.history.replaceState({}, '', url);
     }
 
-    // Check if P is coprime with 60
-    function gcd(a, b) {
-        a = a < 0n ? -a : a;
-        b = b < 0n ? -b : b;
-        while (b > 0n) { const t = b; b = a % b; a = t; }
-        return a;
-    }
-
-    function isCoprime60(p) {
-        return gcd(p, 60n) === 1n;
-    }
-
     // Permutation function with signature encoding
     // For minute m, signature value N, period P:
     // k = (m + N * (CLOCK_PERIOD / P)) mod CLOCK_PERIOD
@@ -358,10 +346,6 @@
 
             if (newP < 1n) {
                 alert('P must be >= 1');
-                return;
-            }
-            if (!isCoprime60(newP)) {
-                alert('P must be coprime with 60 (no factors of 2, 3, or 5)');
                 return;
             }
             if (newN < 0n || newN >= newP) {
@@ -412,8 +396,8 @@
     try {
         sigP = BigInt(initialP);
         sigN = BigInt(initialN);
-        if (!isCoprime60(sigP)) sigP = 1n;
-        if (sigN >= sigP) sigN = 0n;
+        if (sigP < 1n) sigP = 1n;
+        if (sigN < 0n || sigN >= sigP) sigN = 0n;
     } catch (e) {
         sigP = 1n;
         sigN = 0n;
