@@ -433,7 +433,8 @@
         let counterText = `Minute: ${minute} | Second: ${currentSecond}`;
         if (sigP > 1n) {
             const eraLen = CLOCK_PERIOD / sigP;
-            const currentEra = (minute / eraLen) % sigP;
+            const localEra = (minute / eraLen) % sigP;
+            const currentEra = (localEra + sigN) % sigP;  // N is starting era
             counterText += ` | Era: ${currentEra}/${sigP}`;
         }
         document.getElementById('minuteCounter').textContent = counterText;
