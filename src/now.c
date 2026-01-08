@@ -76,6 +76,9 @@ static void usage(const char *prog) {
     printf("  -d          Decimal: output cell mask as number (0-127)\n");
     printf("  -r          Raw: output binary byte per second (bit 7 reserved)\n");
     printf("  -8          8-bit mode: use 8 cells (1,2,4,6,12,15,20,30) for 99.8%% entropy\n");
+    printf("  -W [a,b,c]  Wave mode: triangle wave 0→90→0 with period 2^a × 3^b × 5^c\n");
+    printf("              Default: full period (108,44,24). Message uses remaining capacity.\n");
+    printf("  -M VALUE    Message value to encode in wave mode (default: 0)\n");
     printf("  -n N        Output N frames then exit\n\n");
     printf("Display:\n");
     printf("  -a          ASCII borders\n");
@@ -405,15 +408,15 @@ static int verify_period_full(uint8_t *masks, int num_frames, uint64_t P,
  *   - Simulated (-s): origin = now - elapsed_t (frames are instant)
  *   - Live: origin = start_time - elapsed_t (accounts for real-time delay)
  */
-static int run_inverse(clock_params_t *params, clock8_params_t *params8, int n_specified, int simulate, int error_correct, int forced_format, int mode8) {
+static int run_inverse(clock_params_t *params, clock8_params_t *params8, int n_specified, int simulate, int error_correct, int forced_format, int mode8, int wave_mode, const wave_period_t *wave_period) {
     uint8_t masks[600];  /* Up to 10 minutes */
     frame_correction_t corrections[600];
     int total = 0;
     int align_start = -1;  /* First frame at second 0 */
-    /* For P auto-detection need 2 aligned minutes; check appropriate params struct */
+    /* Wave mode needs 180 frames; P auto-detection needs 2 aligned minutes */
     int p_specified = mode8 ? !U128_EQ(params8->sig_period, U128_ZERO) : (params->sig_period != 0);
-    int need_aligned = p_specified ? 60 : 120;
-    time_t start_time = time(NULL);  /* For live mode correction */
+    int need_aligned = wave_mode ? WAVE_PERIOD : (p_specified ? 60 : 120);
+    time_t start_time = 0;  /* Set when first frame is received */
     int input_format = forced_format;  /* -1 = auto, 0 = visual, 1 = bits, 2 = decimal, 3 = raw */
 
     if (mode8) {
@@ -455,11 +458,15 @@ static int run_inverse(clock_params_t *params, clock8_params_t *params8, int n_s
             if (feof(stdin)) break;  /* End of input */
             continue;  /* Discard truncated frame, try next */
         }
+        /* Record time when first frame arrives */
+        if (total == 0) start_time = time(NULL);
         masks[total++] = m;
-        int sum = mode8 ? mask8_to_sum(m) : (mask_to_sum(m) % 60);
+        /* Wave mode uses full sum (0-90), others use mod 60 */
+        int sum = wave_mode ? mask8_to_full_sum(m) :
+                  (mode8 ? mask8_to_sum(m) : (mask_to_sum(m) % 60));
         fprintf(stderr, "\rFrame %d: sum=%d  ", total, sum);
 
-        /* Track first aligned position */
+        /* Track first aligned position (sum=0) */
         if (align_start < 0 && sum == 0) {
             align_start = total - 1;
         }
@@ -513,6 +520,65 @@ static int run_inverse(clock_params_t *params, clock8_params_t *params8, int n_s
 
     uint64_t elapsed_t = 0;
     uint64_t sig_P = 0, sig_N0 = 0, sig_Nera = 0;
+
+    /* Wave mode inverse: need 180 frames for one cycle */
+    if (wave_mode) {
+        if (total < WAVE_PERIOD) {
+            fprintf(stderr, "Error: Wave mode needs %d frames, got %d\n", WAVE_PERIOD, total);
+            return 1;
+        }
+
+        /* Find alignment: first frame with sum 0 */
+        int wave_align = -1;
+        for (int i = 0; i <= total - WAVE_PERIOD; i++) {
+            int sum = mask8_to_full_sum(masks[i]);
+            if (sum == 0) {
+                wave_align = i;
+                break;
+            }
+        }
+
+        if (wave_align < 0) {
+            fprintf(stderr, "Error: Could not find wave alignment (sum=0 frame)\n");
+            return 1;
+        }
+
+        fprintf(stderr, "Wave alignment at frame %d\n", wave_align);
+
+        uint128_t out_cycle, out_msg;
+        int ret = inverse_wave(masks + wave_align, wave_period, &out_cycle, &out_msg);
+        if (ret < 0) {
+            fprintf(stderr, "Error: inverse_wave failed\n");
+            return 1;
+        }
+
+        /* Compute elapsed time at first input frame:
+         * Aligned frame is at elapsed = cycle * WAVE_PERIOD
+         * First input frame is wave_align frames before that */
+        uint128_t align_elapsed = U128_MUL(out_cycle, WAVE_PERIOD);
+        uint128_t total_frames = U128_SUB(align_elapsed, U128_FROM_U64(wave_align));
+
+        char cycle_str[50], msg_str[50], frames_str[50];
+        u128_to_str(out_cycle, cycle_str, sizeof(cycle_str));
+        u128_to_str(out_msg, msg_str, sizeof(msg_str));
+        u128_to_str(total_frames, frames_str, sizeof(frames_str));
+
+        printf("cycle: %s\n", cycle_str);
+        printf("message: %s\n", msg_str);
+        printf("total_frames: %s\n", frames_str);
+
+        /* Compute origin using start_time (when decoder began reading) */
+        uint64_t t64 = U128_LO(total_frames);
+        time_t origin_time = start_time - (time_t)t64;
+        struct tm *utc = gmtime(&origin_time);
+        if (utc) {
+            printf("\norigin: %04d-%02d-%02dT%02d:%02d:%02dZ\n",
+                   utc->tm_year + 1900, utc->tm_mon + 1, utc->tm_mday,
+                   utc->tm_hour, utc->tm_min, utc->tm_sec);
+        }
+
+        return 0;
+    }
 
     /* Find alignment offset (first frame at second 0) */
     int global_align_offset = 0;
@@ -820,6 +886,9 @@ int main(int argc, char **argv) {
     render_opts_init(&render);
 
     int inverse = 0, simulate = 0, inplace = 0, bits_mode = 0, decimal_mode = 0, raw_mode = 0, error_correct = 0, mode8 = 0;
+    int wave_mode = 0;
+    wave_period_t wave_period = {0, 0, 0};
+    uint128_t wave_msg = U128_ZERO;
     int64_t num_frames = -1, start_t = -1;
     time_t origin = 0;
     int n_specified = 0;  /* Track if -N was explicitly provided */
@@ -840,6 +909,29 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-d") == 0) decimal_mode = 1;
         else if (strcmp(argv[i], "-r") == 0) raw_mode = 1;
         else if (strcmp(argv[i], "-8") == 0) mode8 = 1;
+        else if (strcmp(argv[i], "-W") == 0) {
+            wave_mode = 1;
+            mode8 = 1;  /* Wave mode uses 8 cells */
+            /* Default to full period (no message channel) */
+            wave_period.exp2 = WAVE_EXP2_MAX;
+            wave_period.exp3 = WAVE_EXP3_MAX;
+            wave_period.exp5 = WAVE_EXP5_MAX;
+            /* Override if explicit values provided */
+            if (i+1 < argc && argv[i+1][0] != '-') {
+                int a, b, c;
+                if (sscanf(argv[++i], "%d,%d,%d", &a, &b, &c) == 3) {
+                    wave_period.exp2 = a;
+                    wave_period.exp3 = b;
+                    wave_period.exp5 = c;
+                } else {
+                    fprintf(stderr, "Error: -W format is a,b,c (e.g., -W 0,0,24)\n");
+                    return 1;
+                }
+            }
+        }
+        else if (strcmp(argv[i], "-M") == 0 && i+1 < argc) {
+            wave_msg = str_to_u128(argv[++i]);
+        }
         else if (strcmp(argv[i], "-p") == 0 && i+1 < argc)
             render_apply_preset(&render, argv[++i]);
         else if (strcmp(argv[i], "-f") == 0 && i+1 < argc) {
@@ -946,9 +1038,38 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Validate wave mode parameters */
+    if (wave_mode) {
+        /* Warn if -P/-N specified with wave mode */
+        if (p_str || n_str) {
+            fprintf(stderr, "Warning: -P/-N ignored in wave mode (use -M for message encoding)\n");
+        }
+        /* Validate combo tables at startup */
+        if (validate_wave_combos() < 0) {
+            fprintf(stderr, "Error: WAVE_COMBOS table has invalid entries\n");
+            return 1;
+        }
+        if (wave_period.exp2 < 0 || wave_period.exp2 > WAVE_EXP2_MAX) {
+            fprintf(stderr, "Error: exp2 must be 0-%d (got %d)\n", WAVE_EXP2_MAX, wave_period.exp2);
+            return 1;
+        }
+        if (wave_period.exp3 < 0 || wave_period.exp3 > WAVE_EXP3_MAX) {
+            fprintf(stderr, "Error: exp3 must be 0-%d (got %d)\n", WAVE_EXP3_MAX, wave_period.exp3);
+            return 1;
+        }
+        if (wave_period.exp5 < 0 || wave_period.exp5 > WAVE_EXP5_MAX) {
+            fprintf(stderr, "Error: exp5 must be 0-%d (got %d)\n", WAVE_EXP5_MAX, wave_period.exp5);
+            return 1;
+        }
+        fprintf(stderr, "Wave mode: period 2^%d × 3^%d × 5^%d, message capacity 2^%d × 3^%d × 5^%d\n",
+                wave_period.exp2, wave_period.exp3, wave_period.exp5,
+                WAVE_EXP2_MAX - wave_period.exp2, WAVE_EXP3_MAX - wave_period.exp3,
+                WAVE_EXP5_MAX - wave_period.exp5);
+    }
+
     if (inverse) {
         int forced_format = raw_mode ? 3 : -1;  /* -1 = auto, 3 = raw */
-        return run_inverse(&params, &params8, n_specified, simulate, error_correct, forced_format, mode8);
+        return run_inverse(&params, &params8, n_specified, simulate, error_correct, forced_format, mode8, wave_mode, &wave_period);
     }
 
     /* Show era info when using signatures */
@@ -1009,7 +1130,12 @@ int main(int argc, char **argv) {
         uint64_t t = (uint64_t)display_time;
         uint8_t mask;
 
-        if (mode8) {
+        if (wave_mode) {
+            /* Wave mode: triangle wave 0→90→0 encoding */
+            uint128_t cycle_idx = U128_FROM_U64(t / WAVE_PERIOD);
+            int pos = (int)(t % WAVE_PERIOD);
+            mask = get_wave_mask(cycle_idx, wave_msg, pos, &wave_period);
+        } else if (mode8) {
             /* 8-bit mode: use 128-bit time and 8 cells */
             uint128_t t128 = U128_FROM_U64(t);
             mask = get_mask8(t128, &params8);
