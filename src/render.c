@@ -5,29 +5,39 @@
 #include "render.h"
 #include <string.h>
 
-/* Grid layout: which cell owns each position */
+/* Grid layout: which cell owns each position (7-cell mode) */
 const int GRID[10][6] = {
     {20,20,20,20,12,12}, {20,20,20,20,12,12}, {20,20,20,20,12,12},
     {20,20,20,20,12,12}, {20,20,20,20,12,12}, {15,15,15,1,12,12},
     {15,15,15,2,4,4}, {15,15,15,2,4,4}, {15,15,15,6,6,6}, {15,15,15,6,6,6}
 };
 
-/* Fill presets: name, chars, wide, half */
+/* Grid layout: 8-cell mode with cell 30 (9 columns x 10 rows) */
+const int GRID8[10][9] = {
+    {15,15,15,30,30,30,30,30,30}, {15,15,15,30,30,30,30,30,30},
+    {15,15,15,30,30,30,30,30,30}, {15,15,15,30,30,30,30,30,30},
+    {15,15,15,30,30,30,30,30,30}, {20,20,20,20, 1, 2, 2, 4, 4},
+    {20,20,20,20,12,12,12, 4, 4}, {20,20,20,20,12,12,12, 6, 6},
+    {20,20,20,20,12,12,12, 6, 6}, {20,20,20,20,12,12,12, 6, 6}
+};
+
+/* Fill presets: name, chars (8 UTF-8 chars for cells 1,2,4,6,12,15,20,30), wide, half */
 const render_preset_t PRESETS[] = {
-    {"blocks",   "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88", 0, 0},  /* ███████ */
-    {"blocks1",  "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88", 0, 1},  /* Half-width */
-    {"distinct", "\xe2\x96\x92\xe2\x96\x93\xe2\x96\x88\xe2\x96\x91\xe2\x96\x91\xe2\x96\x88\xe2\x96\x93", 0, 0},  /* ▒▓█░░█▓ */
-    {"cjk",      "\xe6\x97\xa5\xe6\x9c\x88\xe7\x81\xab\xe6\xb0\xb4\xe6\x9c\xa8\xe9\x87\x91\xe5\x9c\x9f", 1, 0},  /* 日月火水木金土 */
-    {"kanji",    "\xe6\x9c\x88\xe7\x81\xab\xe6\xb0\xb4\xe6\x9c\xa8\xe9\x87\x91\xe5\x9c\x9f\xe6\x97\xa5", 1, 0},  /* 月火水木金土日 */
-    {"emoji",    "\xf0\x9f\x9f\xa5\xf0\x9f\x9f\xa7\xf0\x9f\x9f\xa8\xf0\x9f\x9f\xa9\xf0\x9f\x9f\xa6\xf0\x9f\x9f\xaa\xe2\xac\x9b", 1, 0},  /* Colored squares */
+    {"blocks",   "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88", 0, 0},  /* ████████ */
+    {"blocks1",  "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88", 0, 1},  /* Half-width */
+    {"distinct", "\xe2\x96\x92\xe2\x96\x93\xe2\x96\x88\xe2\x96\x91\xe2\x96\x91\xe2\x96\x88\xe2\x96\x93\xe2\x96\x91", 0, 0},  /* ▒▓█░░█▓░ */
+    {"cjk",      "\xe6\x97\xa5\xe6\x9c\x88\xe7\x81\xab\xe6\xb0\xb4\xe6\x9c\xa8\xe9\x87\x91\xe5\x9c\x9f\xe5\xa4\xa9", 1, 0},  /* 日月火水木金土天 */
+    {"kanji",    "\xe6\x9c\x88\xe7\x81\xab\xe6\xb0\xb4\xe6\x9c\xa8\xe9\x87\x91\xe5\x9c\x9f\xe6\x97\xa5\xe5\xa4\xa9", 1, 0},  /* 月火水木金土日天 */
+    {"emoji",    "\xf0\x9f\x9f\xa5\xf0\x9f\x9f\xa7\xf0\x9f\x9f\xa8\xf0\x9f\x9f\xa9\xf0\x9f\x9f\xa6\xf0\x9f\x9f\xaa\xe2\xac\x9b\xf0\x9f\x9f\xa1", 1, 0},  /* 🟥🟧🟨🟩🟦🟪⬛🟡 */
     {NULL, NULL, 0, 0}
 };
 
 /* Border characters */
 static const char *B_TOP_L, *B_TOP_R, *B_BOT_L, *B_BOT_R, *B_HORIZ, *B_VERT;
-static const char *FILL[8];  /* indexed: 0=empty, 1-7 for cells */
+static const char *FILL[9];  /* indexed: 0=empty, 1-8 for cells 1,2,4,6,12,15,20,30 */
 static int cell_width = 2;
-static char custom_fill[8][16];
+static char custom_fill[9][16];
+static int current_mode8 = 0;
 
 /* UTF-8 helper: get byte length of character */
 static int utf8_char_len(const char *s) {
@@ -43,18 +53,20 @@ static int utf8_char_len(const char *s) {
 static int cell_idx(int cell) {
     switch(cell) {
         case 1: return 1; case 2: return 2; case 4: return 3;
-        case 6: return 4; case 12: return 5; case 15: return 6; case 20: return 7;
+        case 6: return 4; case 12: return 5; case 15: return 6;
+        case 20: return 7; case 30: return 8;
     }
     return 0;
 }
 
 static void setup_fills(const render_opts_t *opts) {
     int double_fills = (cell_width == 2) && !opts->wide_fills;
+    int num_cells = opts->mode8 ? 8 : 7;
 
     if (opts->fills && *opts->fills) {
         /* Custom fills */
         const char *p = opts->fills;
-        for (int i = 0; i < 7 && *p; i++) {
+        for (int i = 0; i < num_cells && *p; i++) {
             int len = utf8_char_len(p);
             if (double_fills) {
                 memcpy(custom_fill[i+1], p, len);
@@ -70,10 +82,10 @@ static void setup_fills(const render_opts_t *opts) {
     } else {
         /* Default: solid blocks */
         if (double_fills) {
-            for (int i = 1; i < 8; i++)
+            for (int i = 1; i <= num_cells; i++)
                 FILL[i] = "\xe2\x96\x88\xe2\x96\x88";  /* ██ */
         } else {
-            for (int i = 1; i < 8; i++)
+            for (int i = 1; i <= num_cells; i++)
                 FILL[i] = "\xe2\x96\x88";  /* █ */
         }
     }
@@ -84,6 +96,8 @@ static void setup_fills(const render_opts_t *opts) {
     } else {
         FILL[0] = "  ";
     }
+
+    current_mode8 = opts->mode8;
 }
 
 static void setup_borders(const render_opts_t *opts) {
@@ -109,6 +123,7 @@ void render_opts_init(render_opts_t *opts) {
     opts->ascii = 0;
     opts->half_width = 0;
     opts->wide_fills = 0;
+    opts->mode8 = 0;
     opts->fills = NULL;
     opts->preset = NULL;
     /* Apply default preset (cjk) */
@@ -137,6 +152,7 @@ int is_visible(uint8_t mask, int cell) {
         case 12: return mask & 0x10;
         case 15: return mask & 0x20;
         case 20: return mask & 0x40;
+        case 30: return mask & 0x80;
     }
     return 0;
 }
@@ -144,7 +160,8 @@ int is_visible(uint8_t mask, int cell) {
 void render_mask(uint8_t mask, const render_opts_t *opts, FILE *out) {
     setup_borders(opts);
 
-    int border_width = cell_width * 6;
+    int num_cols = opts->mode8 ? 9 : 6;
+    int border_width = cell_width * num_cols;
 
     /* Top border */
     fprintf(out, "%s", B_TOP_L);
@@ -154,8 +171,8 @@ void render_mask(uint8_t mask, const render_opts_t *opts, FILE *out) {
     /* Content rows */
     for (int r = 0; r < 10; r++) {
         fprintf(out, "%s", B_VERT);
-        for (int c = 0; c < 6; c++) {
-            int cell = GRID[r][c];
+        for (int c = 0; c < num_cols; c++) {
+            int cell = opts->mode8 ? GRID8[r][c] : GRID[r][c];
             int vis = is_visible(mask, cell);
             int idx = vis ? cell_idx(cell) : 0;
             fprintf(out, "%s", FILL[idx]);
@@ -175,7 +192,8 @@ const char *render_mask_to_str(uint8_t mask, const render_opts_t *opts) {
     setup_borders(opts);
 
     char *p = render_buffer;
-    int border_width = cell_width * 6;
+    int num_cols = opts->mode8 ? 9 : 6;
+    int border_width = cell_width * num_cols;
 
     /* Top border */
     p += sprintf(p, "%s", B_TOP_L);
@@ -185,8 +203,8 @@ const char *render_mask_to_str(uint8_t mask, const render_opts_t *opts) {
     /* Content rows */
     for (int r = 0; r < 10; r++) {
         p += sprintf(p, "%s", B_VERT);
-        for (int c = 0; c < 6; c++) {
-            int cell = GRID[r][c];
+        for (int c = 0; c < num_cols; c++) {
+            int cell = opts->mode8 ? GRID8[r][c] : GRID[r][c];
             int vis = is_visible(mask, cell);
             int idx = vis ? cell_idx(cell) : 0;
             p += sprintf(p, "%s", FILL[idx]);
