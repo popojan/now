@@ -159,6 +159,12 @@
         </table>
     </div>
     <div id="controls">
+        <div style="margin-bottom:8px">
+            <label style="display:inline">Origin:</label>
+            <input type="text" id="originInput" placeholder="ISO 8601 or 'now'" style="width:160px">
+            <button onclick="setOrigin()">Set</button>
+            <button onclick="setOriginNow()">Now</button>
+        </div>
         <div>
             <input type="text" id="message" placeholder="Enter message to transmit...">
             <button onclick="setMessage()">Set Message</button>
@@ -265,6 +271,8 @@
     let messageValue = 0n; // Message encoded as BigInt
     let intervalId = null;
     let speed = 1000;
+    let origin = null;     // If set, sync frames to wall clock (1 frame/second)
+    let useWallClock = false;
 
     // Parse URL parameters
     const params = new URLSearchParams(window.location.search);
@@ -272,6 +280,71 @@
     const initialSpeed = parseInt(params.get('speed')) || 1000;
     const initialFrame = BigInt(params.get('frame') || '0');
     const hideControls = params.get('controls') === '0';
+    const initialOrigin = params.get('origin');
+
+    function setOrigin() {
+        const val = document.getElementById('originInput').value.trim();
+        if (!val) {
+            origin = null;
+            useWallClock = false;
+            updateOriginDisplay();
+            updateSpeedUI();
+            updateURL();
+            restartInterval();
+            return;
+        }
+        try {
+            const newOrigin = new Date(val);
+            if (isNaN(newOrigin.getTime())) {
+                alert('Invalid date format. Use ISO 8601 (e.g., 2024-01-01T00:00:00Z)');
+                return;
+            }
+            origin = newOrigin;
+            useWallClock = true;
+            updateOriginDisplay();
+            updateSpeedUI();
+            updateURL();
+            restartInterval();
+        } catch (e) {
+            alert('Invalid date format');
+        }
+    }
+
+    function setOriginNow() {
+        // Floor to start of current second
+        origin = new Date(Math.floor(Date.now() / 1000) * 1000);
+        useWallClock = true;
+        updateOriginDisplay();
+        updateSpeedUI();
+        updateURL();
+        restartInterval();
+    }
+
+    function updateOriginDisplay() {
+        document.getElementById('originInput').value = origin ? origin.toISOString() : '';
+    }
+
+    function updateSpeedUI() {
+        const slider = document.getElementById('speed');
+        const label = document.getElementById('speedLabel');
+        if (useWallClock) {
+            slider.disabled = true;
+            label.textContent = '1000 (wall clock)';
+        } else {
+            slider.disabled = false;
+            label.textContent = speed;
+        }
+    }
+
+    function updateURL() {
+        const url = new URL(window.location);
+        if (origin) {
+            url.searchParams.set('origin', origin.toISOString());
+        } else {
+            url.searchParams.delete('origin');
+        }
+        window.history.replaceState({}, '', url);
+    }
 
     // Draw wave indicator background
     function drawWaveBackground() {
@@ -373,10 +446,20 @@
 
     // Animation step
     function step() {
+        // If origin is set, compute frame from wall clock (1 frame = 1 second)
+        if (useWallClock && origin) {
+            const elapsedSeconds = Math.floor((Date.now() - origin.getTime()) / 1000);
+            globalFrame = BigInt(Math.max(0, elapsedSeconds));
+        }
+
         const data = encodeFrame(globalFrame, messageValue);
         displayFrame(data);
         updateInfo(data);
-        globalFrame++;
+
+        // Only increment if not using wall clock
+        if (!useWallClock) {
+            globalFrame++;
+        }
     }
 
     // Set message
@@ -398,13 +481,19 @@
     function updateSpeed() {
         speed = parseInt(document.getElementById('speed').value);
         document.getElementById('speedLabel').textContent = speed;
-
-        if (intervalId) clearInterval(intervalId);
-        intervalId = setInterval(step, speed);
+        restartInterval();
 
         const url = new URL(window.location);
         url.searchParams.set('speed', speed);
         window.history.replaceState({}, '', url);
+    }
+
+    function restartInterval() {
+        if (intervalId) clearInterval(intervalId);
+        // In wall clock mode, use fast polling (50ms) for smooth display
+        // In manual mode, use the speed slider value
+        const interval = useWallClock ? 50 : speed;
+        intervalId = setInterval(step, interval);
     }
 
     // Toggle controls
@@ -420,6 +509,22 @@
     speed = initialSpeed;
     globalFrame = initialFrame;
 
+    // Initialize origin from URL
+    if (initialOrigin) {
+        try {
+            origin = new Date(initialOrigin);
+            if (!isNaN(origin.getTime())) {
+                useWallClock = true;
+            } else {
+                origin = null;
+            }
+        } catch (e) {
+            origin = null;
+        }
+    }
+    updateOriginDisplay();
+    updateSpeedUI();
+
     if (hideControls) {
         document.getElementById('showControls').checked = false;
         document.getElementById('controls').className = 'hidden';
@@ -432,7 +537,7 @@
     // Initial message and display
     setMessage();
     step();
-    intervalId = setInterval(step, speed);
+    restartInterval();
 
     // Keyboard: Space to pause
     document.addEventListener('keydown', (e) => {
@@ -443,7 +548,7 @@
                 intervalId = null;
                 document.getElementById('info').innerHTML += ' <b>[PAUSED - Space to resume]</b>';
             } else {
-                intervalId = setInterval(step, speed);
+                restartInterval();
             }
         }
     });

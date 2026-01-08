@@ -146,7 +146,13 @@
         </table>
     </div>
     <div id="controls">
-        <div>Signature Encoding</div>
+        <div class="param-row">
+            <label>Origin:</label>
+            <input type="text" id="originInput" placeholder="ISO 8601 or 'now'" style="width:180px">
+            <button onclick="setOrigin()">Set</button>
+            <button onclick="setOriginNow()">Now</button>
+        </div>
+        <div style="margin-top:10px">Signature Encoding</div>
         <div class="param-row">
             <label>P:</label>
             <input type="text" id="paramP" placeholder="Period (coprime 60)" value="1">
@@ -258,10 +264,51 @@
 
     // Parse URL parameters
     const params = new URLSearchParams(window.location.search);
-    const origin = new Date(params.get('origin') || "1970-01-01T00:00:00Z");
+    let origin = new Date(params.get('origin') || "1970-01-01T00:00:00Z");
     const initialP = params.get('P') || params.get('p') || "1";
     const initialN = params.get('N') || params.get('n') || "0";
     const hideControls = params.get('controls') === '0';
+
+    function setOrigin() {
+        const val = document.getElementById('originInput').value.trim();
+        if (!val) return;
+        try {
+            const newOrigin = new Date(val);
+            if (isNaN(newOrigin.getTime())) {
+                alert('Invalid date format. Use ISO 8601 (e.g., 2024-01-01T00:00:00Z)');
+                return;
+            }
+            origin = newOrigin;
+            updateOriginDisplay();
+            updateURL();
+        } catch (e) {
+            alert('Invalid date format');
+        }
+    }
+
+    function setOriginNow() {
+        // Floor to start of current minute for sync with wall clock
+        origin = new Date(Math.floor(Date.now() / 60000) * 60000);
+        updateOriginDisplay();
+        updateURL();
+    }
+
+    function updateOriginDisplay() {
+        document.getElementById('originInput').value = origin.toISOString();
+    }
+
+    function updateURL() {
+        const url = new URL(window.location);
+        url.searchParams.set('origin', origin.toISOString());
+        if (sigP > 1n) {
+            url.searchParams.set('P', sigP.toString());
+            url.searchParams.set('N', sigN.toString());
+        } else {
+            url.searchParams.delete('P');
+            url.searchParams.delete('N');
+        }
+        window.history.replaceState({}, '', url);
+    }
 
     // Check if P is coprime with 60
     function gcd(a, b) {
@@ -325,12 +372,7 @@
             sigP = newP;
             sigN = newN;
 
-            // Update URL
-            const url = new URL(window.location);
-            url.searchParams.set('P', pVal);
-            url.searchParams.set('N', nVal);
-            window.history.replaceState({}, '', url);
-
+            updateURL();
             updateEraInfo();
         } catch (e) {
             alert('Invalid number format');
@@ -383,6 +425,7 @@
     }
 
     updateEraInfo();
+    updateOriginDisplay();
 
     // Main loop
     setInterval(function() {
@@ -402,9 +445,14 @@
             el.style.backgroundColor = colors[cellWeight];
         }
 
-        // Update minute counter
-        document.getElementById('minuteCounter').textContent =
-            `Minute: ${minute} | Second: ${currentSecond}`;
+        // Update minute counter with era info
+        let counterText = `Minute: ${minute} | Second: ${currentSecond}`;
+        if (sigP > 1n) {
+            const eraLen = CLOCK_PERIOD / sigP;
+            const currentEra = (minute / eraLen) % sigP;
+            counterText += ` | Era: ${currentEra}/${sigP}`;
+        }
+        document.getElementById('minuteCounter').textContent = counterText;
 
         // Update second progress bar
         document.getElementById('secondProgress').style.width =
