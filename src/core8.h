@@ -45,6 +45,42 @@ extern const int SEC_M5[24];  /* Seconds with 5 combinations */
 extern const uint8_t COMBOS8[60][5];
 extern const uint8_t COMBO8_CNT[60];
 
+/*
+ * WAVE MODE: Triangle wave 0→90→0 encoding
+ *
+ * Wave cycle: 180 frames, sum goes 0→1→...→90→89→...→1→0
+ * Total capacity per cycle: 2^108 × 3^44 × 5^24 ≈ 1.9×10^70
+ *
+ * Capacity factorization (combo counts are 1,2,3,4,5 only):
+ *   count=1 appears 42 times → contributes 1
+ *   count=2 appears 32 times → contributes 2^32
+ *   count=3 appears 44 times → contributes 3^44
+ *   count=4 appears 38 times → contributes 2^76 (4=2²)
+ *   count=5 appears 24 times → contributes 5^24
+ *   Total: 2^(32+76) × 3^44 × 5^24 = 2^108 × 3^44 × 5^24
+ *
+ * Period allocation: 2^a × 3^b × 5^c where a≤108, b≤44, c≤24
+ * Message capacity: 2^(108-a) × 3^(44-b) × 5^(24-c)
+ */
+#define WAVE_PERIOD 180  /* Frames per cycle */
+#define WAVE_MAX_SUM 90  /* Maximum cell sum */
+
+/* Budget exponents for wave mode */
+#define WAVE_EXP2_MAX 108
+#define WAVE_EXP3_MAX 44
+#define WAVE_EXP5_MAX 24
+
+/* Wave combo tables by sum (0-90) */
+extern const uint8_t WAVE_COMBO_CNT[91];
+extern const uint8_t WAVE_COMBOS[91][5];
+
+/* Wave period parameters */
+typedef struct {
+    int exp2;  /* Exponent for 2 (0 to 108) */
+    int exp3;  /* Exponent for 3 (0 to 44) */
+    int exp5;  /* Exponent for 5 (0 to 24) */
+} wave_period_t;
+
 /* 128-bit arithmetic helpers */
 #if HAS_INT128
 #define U128_ZERO ((uint128_t)0)
@@ -120,5 +156,44 @@ int find_combo8_idx(int s, uint8_t mask);
  * out_sig: signature value (k_combined % P) if P > 0 */
 int inverse8_time(uint8_t masks[60], const clock8_params_t *params,
                   uint128_t *out_t, uint128_t *out_sig);
+
+/* ============ WAVE MODE FUNCTIONS ============ */
+
+/* Compute sum for frame position in wave cycle
+ * pos in [0, 179], returns sum in [0, 90] */
+int wave_sum(int pos);
+
+/* Compute wave position from sum and direction
+ * sum in [0, 90], rising=1 for 0→90, rising=0 for 90→0
+ * Returns pos in [0, 179] */
+int wave_pos(int sum, int rising);
+
+/* Get mask for wave frame given cycle index and message
+ * cycle_idx: which cycle (wraps at period)
+ * msg_val: message value (wraps at message capacity)
+ * pos: position within cycle [0, 179]
+ * period: period allocation (exp2, exp3, exp5) */
+uint8_t get_wave_mask(uint128_t cycle_idx, uint128_t msg_val, int pos,
+                      const wave_period_t *period);
+
+/* Find combo index for given sum and mask
+ * Returns -1 if not found */
+int find_wave_combo_idx(int sum, uint8_t mask);
+
+/* Compute mask sum (0-90, not mod 60) */
+int mask8_to_full_sum(uint8_t mask);
+
+/* Validate WAVE_COMBOS table (call once at startup or in tests)
+ * Returns 0 if valid, -1 if errors found */
+int validate_wave_combos(void);
+
+/* Inverse: reconstruct cycle index and message from 180 masks
+ * masks: array of 180 masks (one complete wave cycle)
+ * period: period allocation
+ * out_cycle: reconstructed cycle index
+ * out_msg: reconstructed message value
+ * Returns 0 on success, -1 on failure */
+int inverse_wave(uint8_t masks[WAVE_PERIOD], const wave_period_t *period,
+                 uint128_t *out_cycle, uint128_t *out_msg);
 
 #endif /* NOW_CORE8_H */

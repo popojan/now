@@ -488,3 +488,368 @@ int inverse8_time(uint8_t masks[60], const clock8_params_t *params,
 
     return -1;
 }
+
+/* ============ WAVE MODE IMPLEMENTATION ============ */
+
+/* Wave mode combo counts by sum (0-90) */
+const uint8_t WAVE_COMBO_CNT[91] = {
+    1,1,1,1,1,1,2,2,1,1,1,1,2,2,1,
+    2,2,2,3,3,3,4,4,3,3,3,3,4,3,2,
+    3,3,4,5,4,4,5,5,5,5,4,4,5,4,3,
+    4,3,4,5,4,4,5,5,5,5,4,4,5,4,3,
+    3,2,3,4,3,3,3,3,4,4,3,3,3,2,2,
+    2,1,2,2,1,1,1,1,2,2,1,1,1,1,1,
+    1
+};
+
+/* Wave mode combos by sum - masks for each sum value */
+const uint8_t WAVE_COMBOS[91][5] = {
+    {0x00,0x00,0x00,0x00,0x00},  /* sum=0, cnt=1 */
+    {0x01,0x00,0x00,0x00,0x00},  /* sum=1, cnt=1 */
+    {0x02,0x00,0x00,0x00,0x00},  /* sum=2, cnt=1 */
+    {0x03,0x00,0x00,0x00,0x00},  /* sum=3, cnt=1 */
+    {0x04,0x00,0x00,0x00,0x00},  /* sum=4, cnt=1 */
+    {0x05,0x00,0x00,0x00,0x00},  /* sum=5, cnt=1 */
+    {0x06,0x08,0x00,0x00,0x00},  /* sum=6, cnt=2 */
+    {0x07,0x09,0x00,0x00,0x00},  /* sum=7, cnt=2 */
+    {0x0A,0x00,0x00,0x00,0x00},  /* sum=8, cnt=1 */
+    {0x0B,0x00,0x00,0x00,0x00},  /* sum=9, cnt=1 */
+    {0x0C,0x00,0x00,0x00,0x00},  /* sum=10, cnt=1 */
+    {0x0D,0x00,0x00,0x00,0x00},  /* sum=11, cnt=1 */
+    {0x0E,0x10,0x00,0x00,0x00},  /* sum=12, cnt=2 */
+    {0x0F,0x11,0x00,0x00,0x00},  /* sum=13, cnt=2 */
+    {0x12,0x00,0x00,0x00,0x00},  /* sum=14, cnt=1 */
+    {0x13,0x20,0x00,0x00,0x00},  /* sum=15, cnt=2 */
+    {0x14,0x21,0x00,0x00,0x00},  /* sum=16, cnt=2 */
+    {0x15,0x22,0x00,0x00,0x00},  /* sum=17, cnt=2 */
+    {0x16,0x18,0x23,0x00,0x00},  /* sum=18, cnt=3 */
+    {0x17,0x19,0x24,0x00,0x00},  /* sum=19, cnt=3 */
+    {0x1A,0x25,0x40,0x00,0x00},  /* sum=20, cnt=3 */
+    {0x1B,0x26,0x28,0x41,0x00},  /* sum=21, cnt=4 */
+    {0x1C,0x27,0x29,0x42,0x00},  /* sum=22, cnt=4 */
+    {0x1D,0x2A,0x43,0x00,0x00},  /* sum=23, cnt=3 */
+    {0x1E,0x2B,0x44,0x00,0x00},  /* sum=24, cnt=3 */
+    {0x1F,0x2C,0x45,0x00,0x00},  /* sum=25, cnt=3 */
+    {0x2D,0x46,0x48,0x00,0x00},  /* sum=26, cnt=3 */
+    {0x2E,0x30,0x47,0x49,0x00},  /* sum=27, cnt=4 */
+    {0x2F,0x31,0x4A,0x00,0x00},  /* sum=28, cnt=3 */
+    {0x32,0x4B,0x00,0x00,0x00},  /* sum=29, cnt=2 */
+    {0x33,0x4C,0x80,0x00,0x00},  /* sum=30, cnt=3 */
+    {0x34,0x4D,0x81,0x00,0x00},  /* sum=31, cnt=3 */
+    {0x35,0x4E,0x50,0x82,0x00},  /* sum=32, cnt=4 */
+    {0x36,0x38,0x4F,0x51,0x83},  /* sum=33, cnt=5 */
+    {0x37,0x39,0x52,0x84,0x00},  /* sum=34, cnt=4 */
+    {0x3A,0x53,0x60,0x85,0x00},  /* sum=35, cnt=4 */
+    {0x3B,0x54,0x61,0x86,0x88},  /* sum=36, cnt=5 */
+    {0x3C,0x55,0x62,0x87,0x89},  /* sum=37, cnt=5 */
+    {0x3D,0x56,0x58,0x63,0x8A},  /* sum=38, cnt=5 */
+    {0x3E,0x57,0x59,0x64,0x8B},  /* sum=39, cnt=5 */
+    {0x3F,0x5A,0x65,0x8C,0x00},  /* sum=40, cnt=4 */
+    {0x5B,0x66,0x68,0x8D,0x00},  /* sum=41, cnt=4 */
+    {0x5C,0x67,0x69,0x8E,0x90},  /* sum=42, cnt=5 */
+    {0x5D,0x6A,0x8F,0x91,0x00},  /* sum=43, cnt=4 */
+    {0x5E,0x6B,0x92,0x00,0x00},  /* sum=44, cnt=3 */
+    {0x5F,0x6C,0x93,0xA0,0x00},  /* sum=45, cnt=4 */
+    {0x6D,0x94,0xA1,0x00,0x00},  /* sum=46, cnt=3 */
+    {0x6E,0x70,0x95,0xA2,0x00},  /* sum=47, cnt=4 */
+    {0x6F,0x71,0x96,0x98,0xA3},  /* sum=48, cnt=5 */
+    {0x72,0x97,0x99,0xA4,0x00},  /* sum=49, cnt=4 */
+    {0x73,0x9A,0xA5,0xC0,0x00},  /* sum=50, cnt=4 */
+    {0x74,0x9B,0xA6,0xA8,0xC1},  /* sum=51, cnt=5 */
+    {0x75,0x9C,0xA7,0xA9,0xC2},  /* sum=52, cnt=5 */
+    {0x76,0x78,0x9D,0xAA,0xC3},  /* sum=53, cnt=5 */
+    {0x77,0x79,0x9E,0xAB,0xC4},  /* sum=54, cnt=5 */
+    {0x7A,0x9F,0xAC,0xC5,0x00},  /* sum=55, cnt=4 */
+    {0x7B,0xAD,0xC6,0xC8,0x00},  /* sum=56, cnt=4 */
+    {0x7C,0xAE,0xB0,0xC7,0xC9},  /* sum=57, cnt=5 */
+    {0x7D,0xAF,0xB1,0xCA,0x00},  /* sum=58, cnt=4 */
+    {0x7E,0xB2,0xCB,0x00,0x00},  /* sum=59, cnt=3 */
+    {0x7F,0xB3,0xCC,0x00,0x00},  /* sum=60, cnt=3 */
+    {0xB4,0xCD,0x00,0x00,0x00},  /* sum=61, cnt=2 */
+    {0xB5,0xCE,0xD0,0x00,0x00},  /* sum=62, cnt=3 */
+    {0xB6,0xB8,0xCF,0xD1,0x00},  /* sum=63, cnt=4 */
+    {0xB7,0xB9,0xD2,0x00,0x00},  /* sum=64, cnt=3 */
+    {0xBA,0xD3,0xE0,0x00,0x00},  /* sum=65, cnt=3 */
+    {0xBB,0xD4,0xE1,0x00,0x00},  /* sum=66, cnt=3 */
+    {0xBC,0xD5,0xE2,0x00,0x00},  /* sum=67, cnt=3 */
+    {0xBD,0xD6,0xD8,0xE3,0x00},  /* sum=68, cnt=4 */
+    {0xBE,0xD7,0xD9,0xE4,0x00},  /* sum=69, cnt=4 */
+    {0xBF,0xDA,0xE5,0x00,0x00},  /* sum=70, cnt=3 */
+    {0xDB,0xE6,0xE8,0x00,0x00},  /* sum=71, cnt=3 */
+    {0xDC,0xE7,0xE9,0x00,0x00},  /* sum=72, cnt=3 */
+    {0xDD,0xEA,0x00,0x00,0x00},  /* sum=73, cnt=2 */
+    {0xDE,0xEB,0x00,0x00,0x00},  /* sum=74, cnt=2 */
+    {0xDF,0xEC,0x00,0x00,0x00},  /* sum=75, cnt=2 */
+    {0xED,0x00,0x00,0x00,0x00},  /* sum=76, cnt=1 */
+    {0xEE,0xF0,0x00,0x00,0x00},  /* sum=77, cnt=2 */
+    {0xEF,0xF1,0x00,0x00,0x00},  /* sum=78, cnt=2 */
+    {0xF2,0x00,0x00,0x00,0x00},  /* sum=79, cnt=1 */
+    {0xF3,0x00,0x00,0x00,0x00},  /* sum=80, cnt=1 */
+    {0xF4,0x00,0x00,0x00,0x00},  /* sum=81, cnt=1 */
+    {0xF5,0x00,0x00,0x00,0x00},  /* sum=82, cnt=1 */
+    {0xF6,0xF8,0x00,0x00,0x00},  /* sum=83, cnt=2 */
+    {0xF7,0xF9,0x00,0x00,0x00},  /* sum=84, cnt=2 */
+    {0xFA,0x00,0x00,0x00,0x00},  /* sum=85, cnt=1 */
+    {0xFB,0x00,0x00,0x00,0x00},  /* sum=86, cnt=1 */
+    {0xFC,0x00,0x00,0x00,0x00},  /* sum=87, cnt=1 */
+    {0xFD,0x00,0x00,0x00,0x00},  /* sum=88, cnt=1 */
+    {0xFE,0x00,0x00,0x00,0x00},  /* sum=89, cnt=1 */
+    {0xFF,0x00,0x00,0x00,0x00},  /* sum=90, cnt=1 */
+};
+
+/* Triangle wave: pos → sum
+ * pos 0-90: sum = pos (rising)
+ * pos 91-179: sum = 180 - pos (falling) */
+int wave_sum(int pos) {
+    pos = pos % WAVE_PERIOD;
+    if (pos <= WAVE_MAX_SUM) return pos;
+    return WAVE_PERIOD - pos;
+}
+
+/* Inverse: (sum, rising) → pos */
+int wave_pos(int sum, int rising) {
+    if (rising) return sum;
+    return WAVE_PERIOD - sum;
+}
+
+/* Compute full sum (0-90) from mask */
+int mask8_to_full_sum(uint8_t mask) {
+    int sum = 0;
+    if (mask & 0x01) sum += 1;
+    if (mask & 0x02) sum += 2;
+    if (mask & 0x04) sum += 4;
+    if (mask & 0x08) sum += 6;
+    if (mask & 0x10) sum += 12;
+    if (mask & 0x20) sum += 15;
+    if (mask & 0x40) sum += 20;
+    if (mask & 0x80) sum += 30;
+    return sum;  /* 0-90, not mod 60 */
+}
+
+/* Validate WAVE_COMBOS table (call once at startup or in tests)
+ * Returns 0 if valid, -1 if errors found */
+int validate_wave_combos(void) {
+    int errors = 0;
+    for (int sum = 0; sum <= WAVE_MAX_SUM; sum++) {
+        int cnt = WAVE_COMBO_CNT[sum];
+        for (int i = 0; i < cnt; i++) {
+            uint8_t mask = WAVE_COMBOS[sum][i];
+            int actual = mask8_to_full_sum(mask);
+            if (actual != sum) {
+                errors++;
+            }
+        }
+    }
+    return errors ? -1 : 0;
+}
+
+/* Find combo index for given sum and mask */
+int find_wave_combo_idx(int sum, uint8_t mask) {
+    if (sum < 0 || sum > WAVE_MAX_SUM) return -1;
+    int cnt = WAVE_COMBO_CNT[sum];
+    for (int i = 0; i < cnt; i++) {
+        if (WAVE_COMBOS[sum][i] == mask) return i;
+    }
+    return -1;
+}
+
+/*
+ * Wave encoding with parametric period allocation.
+ *
+ * Period = 2^exp2 × 3^exp3 × 5^exp5
+ * Message capacity = 2^(108-exp2) × 3^(44-exp3) × 5^(24-exp5)
+ *
+ * Fixed allocation rule:
+ * - First exp3 frames with count=3 → period (base-3 digits)
+ * - First exp5 frames with count=5 → period (base-5 digits)
+ * - First frames with count=2/4 accumulating exp2 powers of 2 → period
+ * - Remaining frames → message
+ *
+ * We track:
+ * - n3_seen: how many count=3 frames we've seen so far
+ * - n5_seen: how many count=5 frames we've seen so far
+ * - n2_seen: accumulated powers of 2 from count=2/4 frames
+ *
+ * If frame is "period frame": extract digit from cycle_idx
+ * If frame is "message frame": extract digit from msg_val
+ */
+
+/* Determine if frame at position p is a period frame or message frame */
+static int is_period_frame(int pos, const wave_period_t *period,
+                           int *period_digit_idx, int *msg_digit_idx) {
+    int n3 = 0, n5 = 0, n2_accum = 0;
+    int p_idx = 0, m_idx = 0;
+
+    for (int p = 0; p <= pos; p++) {
+        int sum = wave_sum(p);
+        int cnt = WAVE_COMBO_CNT[sum];
+
+        if (cnt == 3) {
+            if (n3 < period->exp3) {
+                /* This frame contributes to period */
+                if (p == pos) { *period_digit_idx = p_idx; return 1; }
+                p_idx++;
+            } else {
+                /* This frame contributes to message */
+                if (p == pos) { *msg_digit_idx = m_idx; return 0; }
+                m_idx++;
+            }
+            n3++;
+        } else if (cnt == 5) {
+            if (n5 < period->exp5) {
+                if (p == pos) { *period_digit_idx = p_idx; return 1; }
+                p_idx++;
+            } else {
+                if (p == pos) { *msg_digit_idx = m_idx; return 0; }
+                m_idx++;
+            }
+            n5++;
+        } else if (cnt == 2) {
+            /* count=2 contributes 1 power of 2 */
+            if (n2_accum < period->exp2) {
+                if (p == pos) { *period_digit_idx = p_idx; return 1; }
+                p_idx++;
+                n2_accum += 1;
+            } else {
+                if (p == pos) { *msg_digit_idx = m_idx; return 0; }
+                m_idx++;
+            }
+        } else if (cnt == 4) {
+            /* count=4 contributes 2 powers of 2 */
+            if (n2_accum + 2 <= period->exp2) {
+                if (p == pos) { *period_digit_idx = p_idx; return 1; }
+                p_idx++;
+                n2_accum += 2;
+            } else if (n2_accum < period->exp2) {
+                /* Partial: need only 1 more power, but this gives 2 */
+                /* For simplicity, include it in period (wastes 1 power) */
+                if (p == pos) { *period_digit_idx = p_idx; return 1; }
+                p_idx++;
+                n2_accum += 2;
+            } else {
+                if (p == pos) { *msg_digit_idx = m_idx; return 0; }
+                m_idx++;
+            }
+        }
+        /* cnt == 1: no data, skip */
+    }
+
+    /* Should not reach here */
+    *msg_digit_idx = 0;
+    return 0;
+}
+
+/* Extract digit from value at given digit position using mixed-radix
+ * digit_idx: which digit to extract (0 = least significant)
+ * is_period: if true, use period frame ordering; else message frame ordering
+ */
+static int extract_digit(uint128_t value, int digit_idx, int is_period,
+                         const wave_period_t *period) {
+    int cur_digit = 0;
+
+    for (int p = 0; p < WAVE_PERIOD; p++) {
+        int sum = wave_sum(p);
+        int cnt = WAVE_COMBO_CNT[sum];
+        if (cnt <= 1) continue;
+
+        int p_digit_idx, m_digit_idx;
+        int frame_is_period = is_period_frame(p, period, &p_digit_idx, &m_digit_idx);
+
+        if (frame_is_period == is_period) {
+            if (cur_digit == digit_idx) {
+                return (int)U128_MOD(value, cnt);
+            }
+            value = U128_DIV(value, cnt);
+            cur_digit++;
+        }
+    }
+
+    return 0;
+}
+
+uint8_t get_wave_mask(uint128_t cycle_idx, uint128_t msg_val, int pos,
+                      const wave_period_t *period) {
+    int sum = wave_sum(pos);
+    int cnt = WAVE_COMBO_CNT[sum];
+
+    if (cnt <= 1) {
+        return WAVE_COMBOS[sum][0];
+    }
+
+    int p_digit_idx, m_digit_idx;
+    int is_period = is_period_frame(pos, period, &p_digit_idx, &m_digit_idx);
+
+    int digit;
+    if (is_period) {
+        digit = extract_digit(cycle_idx, p_digit_idx, 1, period);
+    } else {
+        digit = extract_digit(msg_val, m_digit_idx, 0, period);
+    }
+
+    if (digit < 0 || digit >= cnt) digit = 0;
+    return WAVE_COMBOS[sum][digit];
+}
+
+/*
+ * Inverse wave: reconstruct cycle index and message from 180 masks
+ *
+ * Assumes masks are aligned (mask[0] is at pos=0, sum=0).
+ * Verifies sum pattern matches triangle wave.
+ * Uses same fixed allocation as encoding.
+ */
+int inverse_wave(uint8_t masks[WAVE_PERIOD], const wave_period_t *period,
+                 uint128_t *out_cycle, uint128_t *out_msg) {
+    /* Verify sum pattern */
+    for (int p = 0; p < WAVE_PERIOD; p++) {
+        int expected_sum = wave_sum(p);
+        int actual_sum = mask8_to_full_sum(masks[p]);
+        if (actual_sum != expected_sum) {
+            return -1;  /* Sum mismatch */
+        }
+    }
+
+    /* Collect period digits and message digits separately */
+    int period_digits[180], period_bases[180], n_period = 0;
+    int msg_digits[180], msg_bases[180], n_msg = 0;
+
+    for (int p = 0; p < WAVE_PERIOD; p++) {
+        int sum = wave_sum(p);
+        int cnt = WAVE_COMBO_CNT[sum];
+        if (cnt <= 1) continue;
+
+        int digit = find_wave_combo_idx(sum, masks[p]);
+        if (digit < 0) return -1;
+
+        int p_digit_idx, m_digit_idx;
+        int is_per = is_period_frame(p, period, &p_digit_idx, &m_digit_idx);
+
+        if (is_per) {
+            period_digits[n_period] = digit;
+            period_bases[n_period] = cnt;
+            n_period++;
+        } else {
+            msg_digits[n_msg] = digit;
+            msg_bases[n_msg] = cnt;
+            n_msg++;
+        }
+    }
+
+    /* Reconstruct period value (mixed-radix, digits are LSB first) */
+    uint128_t cycle_val = U128_ZERO;
+    for (int i = n_period - 1; i >= 0; i--) {
+        cycle_val = U128_MUL(cycle_val, period_bases[i]);
+        cycle_val = U128_ADD(cycle_val, U128_FROM_U64(period_digits[i]));
+    }
+
+    /* Reconstruct message value */
+    uint128_t msg_val = U128_ZERO;
+    for (int i = n_msg - 1; i >= 0; i--) {
+        msg_val = U128_MUL(msg_val, msg_bases[i]);
+        msg_val = U128_ADD(msg_val, U128_FROM_U64(msg_digits[i]));
+    }
+
+    *out_cycle = cycle_val;
+    *out_msg = msg_val;
+
+    return 0;
+}
