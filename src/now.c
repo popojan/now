@@ -1088,7 +1088,7 @@ int main(int argc, char **argv) {
     }
 
     if (inverse) {
-        int forced_format = raw_mode ? 3 : -1;  /* -1 = auto, 3 = raw */
+        int forced_format = raw_mode ? 3 : (decimal_mode ? 2 : (bits_mode ? 1 : -1));
         return run_inverse(&params, &params8, n_specified, simulate, error_correct, forced_format, mode8, wave_mode, &wave_period);
     }
 
