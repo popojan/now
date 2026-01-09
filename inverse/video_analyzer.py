@@ -741,6 +741,7 @@ def find_adaptive_threshold(warped_frames, empty_color):
     Find the optimal threshold for separating filled from empty cells.
 
     Uses the gap in the fill score distribution to find a natural threshold.
+    Prefers the largest gap method as it's more robust across different videos.
 
     Args:
         warped_frames: list of perspective-corrected frames
@@ -1052,21 +1053,36 @@ def analyze_video(video_path, tolerance=80, verbose=False):
             print(f"Adaptive threshold: {adaptive_tol:.0f}")
 
         # Build second_to_frame with error correction
+        # Key: (minute_idx, clock_second) to support multi-minute recordings
         second_to_frame = {}
+        minute_idx = 0
+        prev_second = -1
+
         for frame_idx, warped in enumerate(warped_frames):
             visible = get_visible_cells_warped(warped, empty_color, adaptive_tol)
             clock_second = cells_to_second(visible)
 
-            if clock_second not in second_to_frame:
+            # Skip empty frames (timelapse averaging artifacts)
+            if not visible:
+                continue
+
+            # Detect minute boundary (wraparound from high to low second)
+            if prev_second >= 45 and clock_second <= 15:
+                minute_idx += 1
+            prev_second = clock_second
+
+            key = (minute_idx, clock_second)
+            if key not in second_to_frame:
                 idx = find_combination_index(clock_second, visible)
                 if idx >= 0:
-                    second_to_frame[clock_second] = (frame_idx, visible)
+                    second_to_frame[key] = (frame_idx, visible)
                 else:
                     _, _, corrected = validate_observation(visible)
                     if corrected is not None:
                         corrected_second = cells_to_second(corrected)
-                        if corrected_second not in second_to_frame:
-                            second_to_frame[corrected_second] = (frame_idx, corrected)
+                        corrected_key = (minute_idx, corrected_second)
+                        if corrected_key not in second_to_frame:
+                            second_to_frame[corrected_key] = (frame_idx, corrected)
 
         return second_to_frame, len(second_to_frame), empty_color, corner_history, adaptive_tol
 
@@ -1103,21 +1119,36 @@ def analyze_video(video_path, tolerance=80, verbose=False):
         adaptive_tol = find_adaptive_threshold(warped_frames, empty_color)
 
         # Build second_to_frame with error correction
+        # Key: (minute_idx, clock_second) to support multi-minute recordings
         second_to_frame = {}
+        minute_idx = 0
+        prev_second = -1
+
         for frame_idx, warped in enumerate(warped_frames):
             visible = get_visible_cells_warped(warped, empty_color, adaptive_tol)
             clock_second = cells_to_second(visible)
 
-            if clock_second not in second_to_frame:
+            # Skip empty frames (timelapse averaging artifacts)
+            if not visible:
+                continue
+
+            # Detect minute boundary (wraparound from high to low second)
+            if prev_second >= 45 and clock_second <= 15:
+                minute_idx += 1
+            prev_second = clock_second
+
+            key = (minute_idx, clock_second)
+            if key not in second_to_frame:
                 idx = find_combination_index(clock_second, visible)
                 if idx >= 0:
-                    second_to_frame[clock_second] = (frame_idx, visible)
+                    second_to_frame[key] = (frame_idx, visible)
                 else:
                     _, _, corrected = validate_observation(visible)
                     if corrected is not None:
                         corrected_second = cells_to_second(corrected)
-                        if corrected_second not in second_to_frame:
-                            second_to_frame[corrected_second] = (frame_idx, corrected)
+                        corrected_key = (minute_idx, corrected_second)
+                        if corrected_key not in second_to_frame:
+                            second_to_frame[corrected_key] = (frame_idx, corrected)
 
         return second_to_frame, len(second_to_frame), empty_color, corner_history, adaptive_tol
 
@@ -1188,7 +1219,8 @@ def analyze_video(video_path, tolerance=80, verbose=False):
     # Second 0 marks the exact minute boundary
     # This allows precise origin calculation regardless of when recording started
     minute_boundary_offset_ms = None
-    if second_0_frames and 0 in second_to_frame:
+    has_second_0 = any(key[1] == 0 for key in second_to_frame.keys())
+    if second_0_frames and has_second_0:
         # Find first valid occurrence of second 0
         second_0_frame = second_0_frames[0]
         first_second = frame_to_second[0] if frame_to_second else 0
@@ -1212,39 +1244,155 @@ def analyze_video(video_path, tolerance=80, verbose=False):
     # Find the starting clock second (first valid observation)
     start_second = frame_to_second[0] if frame_to_second else 0
 
-    # Build observation sequence starting from start_second
-    all_observations = []
-    for i in range(len(second_to_frame)):  # Up to number of unique seconds found
-        target_second = (start_second + i) % 60
-        if target_second in second_to_frame:
-            frame_idx, obs = second_to_frame[target_second]
-            all_observations.append(obs)
+    # VIRTUAL_START VOTING on deduplicated observations
+    # Use second_to_frame which has one validated observation per second per minute
+    # Key format: (minute_idx, clock_second)
+    # virtual_start = (detected_second - observation_index_within_minute) % 60
+
+    # Group by minute and sort by frame order within each minute
+    minutes = {}
+    for (min_idx, clock_second), (frame_idx, visible) in second_to_frame.items():
+        if min_idx not in minutes:
+            minutes[min_idx] = []
+        minutes[min_idx].append((clock_second, frame_idx, visible))
+
+    # Sort each minute's observations by frame order
+    for min_idx in minutes:
+        minutes[min_idx].sort(key=lambda x: x[1])
+
+    # Do virtual_start voting per minute, then combine
+    vstart_counts = [0] * 60
+    all_observations_by_minute = {}  # min_idx -> list of 60 observations
+
+    for min_idx in sorted(minutes.keys()):
+        entries = minutes[min_idx]
+        observations_with_vs = []
+
+        for obs_idx, (clock_second, frame_idx, visible) in enumerate(entries):
+            virtual_start = (clock_second - obs_idx) % 60
+            vstart_counts[virtual_start] += 1
+            observations_with_vs.append((obs_idx, clock_second, visible, virtual_start))
+
+        # Find winning virtual_start for this minute
+        minute_vstart_counts = [0] * 60
+        for _, _, _, vs in observations_with_vs:
+            minute_vstart_counts[vs] += 1
+        minute_winning_vstart = max(range(60), key=lambda x: minute_vstart_counts[x])
+
+        # Build observations for this minute
+        anchor_obs = {}  # clock_second -> visible (from anchors only)
+        all_obs = {}     # clock_second -> visible (any detection)
+
+        for obs_idx, clock_second, visible, vs in observations_with_vs:
+            if clock_second not in all_obs:
+                all_obs[clock_second] = visible
+            if vs == minute_winning_vstart:
+                if clock_second not in anchor_obs:
+                    anchor_obs[clock_second] = visible
+
+        # Build observation list for this minute
+        # Index by clock second, so minute_observations[sec] = observation for second sec
+        minute_observations = [set() for _ in range(60)]
+        for second in range(60):
+            if second in anchor_obs:
+                minute_observations[second] = anchor_obs[second]
+            elif second in all_obs:
+                minute_observations[second] = all_obs[second]
+
+        all_observations_by_minute[min_idx] = (minute_observations, minute_winning_vstart)
+
+    # Find global winning virtual_start
+    winning_vstart = max(range(60), key=lambda x: vstart_counts[x])
+    anchor_count = vstart_counts[winning_vstart]
+
+    if verbose:
+        total_obs = sum(len(minutes[m]) for m in minutes)
+        print(f"Virtual_start voting: winner={winning_vstart} with {anchor_count}/{total_obs} anchors")
+        print(f"Video has {len(minutes)} minute(s) of data")
+
+    # For ~1 minute videos that span a minute boundary (common case):
+    # Merge minute 0 and minute 1 to get complete 60-second cycle
+    # For true multi-minute videos, use each minute's data separately
+    num_minutes = len(all_observations_by_minute)
+
+    if num_minutes == 0:
+        # No data at all
+        all_observations = [set() for _ in range(60)]
+        start_second = 0
+    elif num_minutes == 1:
+        # Single minute - use its data directly
+        min_idx = list(all_observations_by_minute.keys())[0]
+        all_observations, start_second = all_observations_by_minute[min_idx]
+    elif sum(len(minutes.get(m, [])) for m in range(num_minutes)) <= 90:
+        # Total observations is roughly 60-90 - this is likely a single clock minute
+        # video that spans one or more minute boundaries. Merge all minute data.
+
+        # Build a lookup by clock_second from all minutes
+        # Prefer data from earlier minutes (more likely to be from the target minute k)
+        second_to_obs = {}
+        first_start = None
+        for min_idx in sorted(all_observations_by_minute.keys()):
+            obs, start = all_observations_by_minute[min_idx]
+            if first_start is None:
+                first_start = start
+            for i in range(60):
+                clock_sec = (start + i) % 60
+                if obs[i] and clock_sec not in second_to_obs:
+                    second_to_obs[clock_sec] = obs[i]
+
+        # Build merged array starting from first minute's start
+        start0 = first_start if first_start is not None else 0
+        merged = []
+        for i in range(60):
+            clock_sec = (start0 + i) % 60
+            merged.append(second_to_obs.get(clock_sec, set()))
+
+        all_observations = merged
+        start_second = start0
+    else:
+        # True multi-minute video - use the most complete minute
+        # (usually minute 0 is partial if video started mid-minute)
+        best_minute = None
+        best_count = -1
+        for min_idx in sorted(all_observations_by_minute.keys()):
+            obs, _ = all_observations_by_minute[min_idx]
+            non_empty = sum(1 for o in obs if o)
+            if non_empty > best_count:
+                best_count = non_empty
+                best_minute = min_idx
+
+        if best_minute is not None:
+            all_observations, start_second = all_observations_by_minute[best_minute]
         else:
-            all_observations.append(set())  # Missing second
+            all_observations = [set() for _ in range(60)]
+            start_second = 0
 
-        if verbose and i < 5:
-            print(f"Second {i}: {sorted(all_observations[-1])}")
+    if verbose:
+        for i in range(min(5, len(all_observations))):
+            sec = (start_second + i) % 60
+            print(f"Second {sec}: {sorted(all_observations[i])}")
 
-    # Split into main observations (first 60) and extra (for verification)
-    observations = all_observations[:60]
-    extra_observations = all_observations[60:] if len(all_observations) > 60 else []
+    # Return all observations (for multi-minute signature detection)
+    observations = all_observations
 
-    # Count real (non-empty) observations before padding
+    # Count real (non-empty) observations
     real_observations = sum(1 for obs in observations if obs)
 
-    # Pad to 60 if needed (shouldn't happen with duration check, but safety)
+    # Pad to at least 60 if needed (shouldn't happen with duration check, but safety)
     while len(observations) < 60:
         observations.append(set())
 
-    # Store extra observations and corrections in metadata
-    metadata['extra_observations'] = extra_observations
+    # Store metadata
     metadata['minute_boundary_offset_ms'] = minute_boundary_offset_ms
     metadata['corrected_frames'] = corrected_count
     metadata['start_second'] = start_second
     metadata['real_observations'] = real_observations  # Non-empty observation count
+    metadata['total_seconds'] = len(all_observations)  # Total unique seconds captured
+    metadata['num_minutes'] = len(minutes)  # Number of complete minutes
+    metadata['all_minutes'] = all_observations_by_minute  # All minute data for signature detection
 
-    if extra_observations and verbose:
-        print(f"Video has {len(extra_observations)} extra seconds for verification")
+    if len(minutes) > 1 and verbose:
+        print(f"Video has {len(minutes)} minute(s) of data")
 
     return observations, metadata
 
