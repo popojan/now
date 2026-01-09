@@ -15,7 +15,11 @@ from datetime import datetime, timedelta
 
 from clock_inverse import (
     find_k_from_observations,
+    find_k_with_autodetect,
+    find_k_multi_minute,
+    detect_sig_period_from_multi_minute,
     get_all_cells_for_minute,
+    inverse_with_correction,
     PERIOD,
 )
 from video_analyzer import analyze_video, VideoTooShortError
@@ -53,7 +57,7 @@ def format_ancient_date(year, month, day, hour, minute, second):
         return f"-{abs(year):04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
 
-def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_offset_ms=None):
+def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_offset_ms=None, sig_P=1, sig_N=0):
     """
     Compute when the clock was originally started.
 
@@ -62,6 +66,8 @@ def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_of
         rotation_offset: which second (0-59) the video started at
         k: the minute identifier recovered from inversion
         minute_boundary_offset_ms: if available, precise offset from video start to minute boundary
+        sig_P: signature period P (for signature encoding k = minute * P + N)
+        sig_N: signature N value
 
     Returns:
         (clock_origin datetime or string for ancient dates, sub_second_offset_ms for precision indication)
@@ -80,13 +86,22 @@ def compute_clock_origin(video_timestamp, rotation_offset, k, minute_boundary_of
         sub_second_ms = 0
 
     # When video spans two minutes (rotation_offset > 0), k is the NEXT minute
-    # (containing second 0 we observe), so use k-1 for the current minute
-    effective_k = k - 1 if rotation_offset > 0 else k
+    # (containing second 0 we observe), so adjust k for the current minute
+    if rotation_offset > 0:
+        effective_k = k - sig_P  # Previous minute in signature encoding
+    else:
+        effective_k = k
 
-    # The clock has been running for effective_k minutes since epoch
+    # With signature encoding (k = minute * P + N), compute actual minutes elapsed
+    if sig_P > 1:
+        actual_minutes = (effective_k - sig_N) // sig_P
+    else:
+        actual_minutes = effective_k
+
+    # The clock has been running for actual_minutes since epoch
     # Use days to avoid overflow with large k values
-    days = effective_k // (60 * 24)
-    remaining_minutes = effective_k % (60 * 24)
+    days = actual_minutes // (60 * 24)
+    remaining_minutes = actual_minutes % (60 * 24)
 
     try:
         clock_origin = minute_start - timedelta(days=days, minutes=remaining_minutes)
@@ -238,6 +253,12 @@ def main():
         action="store_true",
         help="Generate debug visualization video"
     )
+    parser.add_argument(
+        "--sig-period", "-P",
+        type=int,
+        default=None,
+        help="Signature period P for k encoding (auto-detected if not given)"
+    )
 
     args = parser.parse_args()
 
@@ -296,16 +317,48 @@ def main():
         for i, obs in enumerate(observations[:5]):
             print(f"  Second {i}: {sorted(obs)}")
 
-    # Find k using sum-based detection - try progressively lower thresholds if needed
-    print("\nSearching for valid clock state...")
-    start_second, k, match_count = find_k_from_observations(observations)
+    # Detect signature period P from multi-minute data (if available)
+    all_minutes = metadata.get('all_minutes', {})
+    detected_sig_period = args.sig_period  # User override takes precedence
 
-    # If 90% threshold fails, try lower thresholds
+    if detected_sig_period is None and len(all_minutes) >= 2:
+        multi_P, multi_N, multi_k_values = detect_sig_period_from_multi_minute(all_minutes)
+        if multi_P > 1:
+            detected_sig_period = multi_P
+            print(f"\nDetected signature from multi-minute analysis: P={multi_P}, N={multi_N}")
+            if args.verbose:
+                print(f"  k values per minute: {multi_k_values}")
+
+    # Find k using sum-based detection with error correction (always on)
+    print("\nSearching for valid clock state...")
+    result = inverse_with_correction(observations, apply_correction=True, sig_period=detected_sig_period)
+
+    start_second = result['start_second']
+    k = result['k']
+    match_count = result['match_count']
+    sig_P = result['P']
+    sig_N = result['N']
+    sig_confidence = result['signature_confidence']
+    anchor_count = result['anchor_count']
+    corrections = result['corrections']
+
+    # Report error correction stats
+    if corrections:
+        num_corrected = sum(1 for c in corrections if not c.is_anchor)
+        if num_corrected > 0:
+            distances = [c.distance for c in corrections if not c.is_anchor]
+            print(f"  Error correction: {anchor_count} anchors, {num_corrected} corrected (distances: {distances})")
+
+    # If no valid state found, try lower thresholds with autodetection
     if k is None:
         for threshold in [0.85, 0.80, 0.75]:
-            start_second, k, match_count = find_k_from_observations(observations, min_match_ratio=threshold)
+            start_second, k, match_count, detected_P = find_k_with_autodetect(
+                observations, min_match_ratio=threshold, sig_period=args.sig_period
+            )
             if k is not None:
-                print(f"  (Used {int(threshold*100)}% match threshold)")
+                print(f"  (Used {int(threshold*100)}% match threshold, correction disabled)")
+                sig_P = detected_P
+                sig_N = k % sig_P if sig_P > 0 else 0
                 break
 
     if k is None:
@@ -319,6 +372,28 @@ def main():
     print(f"Found valid state! ({match_count}/60 seconds matched)")
     print(f"  Video started at second: {start_second}")
     print(f"  Minute identifier (k): {k}")
+    if sig_P > 1:
+        print(f"  Detected signature: P={sig_P}, N={sig_N}")
+
+    # For multi-minute videos, use multi-minute verification
+    # This catches detection errors by cross-checking k values across minutes
+    all_minutes = metadata.get('all_minutes', {})
+    if len(all_minutes) >= 2:
+        multi_result = find_k_multi_minute(all_minutes, verbose=args.verbose, sig_period=sig_P)
+        if multi_result['k'] is not None and len(multi_result['k_values']) >= 2:
+            # Check if multi-minute analysis found a different k
+            if multi_result['corrected_minute'] is not None:
+                original_k = multi_result['original_k']
+                corrected_k = multi_result['k']
+                print(f"  Multi-minute verification: corrected k={original_k} -> k={corrected_k}")
+                k = corrected_k
+            # Use signature detection from multi-minute analysis
+            if multi_result['P'] > 1:
+                sig_P = multi_result['P']
+                sig_N = multi_result['N']
+                sig_confidence = multi_result['confidence']
+                if args.verbose:
+                    print(f"  Detected signature: P={sig_P}, N={sig_N} (confidence={sig_confidence*100:.0f}%)")
 
     # Correct video timestamp using detected second (±30s tolerance)
     # The detected second tells us exactly where in the minute cycle we are
@@ -354,11 +429,17 @@ def main():
             print(f"  Second {clock_second}: expected {expected_cells}, observed {observed_cells} [{match}]")
 
     # Compute origin
-    clock_origin, sub_second_ms = compute_clock_origin(video_timestamp, start_second, k, minute_boundary_offset_ms)
+    clock_origin, sub_second_ms = compute_clock_origin(video_timestamp, start_second, k, minute_boundary_offset_ms, sig_P, sig_N)
 
-    # Compute elapsed time
-    seconds_elapsed = k * 60 + start_second
-    minutes_elapsed = k
+    # Compute elapsed time (using actual minutes for signature encoding)
+    # When spanning (start_second > 0), k is for the "next" minute, so adjust
+    if sig_P > 1:
+        effective_k = k - sig_P if start_second > 0 else k
+        actual_minutes = (effective_k - sig_N) // sig_P
+    else:
+        actual_minutes = k - 1 if start_second > 0 else k
+    seconds_elapsed = actual_minutes * 60 + start_second
+    minutes_elapsed = actual_minutes
     days_elapsed = minutes_elapsed / (60 * 24)
     years_elapsed = days_elapsed / 365.25
 
@@ -390,6 +471,11 @@ def main():
             print(f"  {format_timestamp(clock_origin_utc)} ({sub_second_ms:+d}ms)")
         else:
             print(f"  {format_timestamp(clock_origin_utc)}")
+
+    # Display signature (P/N) right after origin
+    print(f"\nSignature:")
+    print(f"  P: {sig_P}")
+    print(f"  N: {sig_N}")
 
     print(f"\nNote: The clock period is {PERIOD:,} minutes")
     print(f"      (>{PERIOD / (60 * 24 * 365.25) / 1e9:.0f} billion years)")
