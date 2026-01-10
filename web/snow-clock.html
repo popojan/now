@@ -248,16 +248,10 @@
     }
 
     function perm(minute, P, N) {
-        let k;
-        if (P <= 1n) {
-            k = minute % CLOCK_PERIOD;
-        } else {
-            // Era length in minutes
-            const eraLen = CLOCK_PERIOD / P;
-            // Offset for this signature value
-            const offset = (N % P) * eraLen;
-            k = (minute + offset) % CLOCK_PERIOD;
-        }
+        // Signature encoding: k = minute * P + N
+        // P detectable from k-delta between consecutive minutes
+        // Full PERIOD preserved when P is coprime with 2 and 3
+        let k = (minute * P + N) % CLOCK_PERIOD;
 
         // Original 7-bit permutation algorithm
         let ret = [];
@@ -356,19 +350,9 @@
         if (sigP <= 1n) {
             eraInfo.textContent = 'Signature: disabled (P=1)';
         } else {
-            const eraMinutes = CLOCK_PERIOD / sigP;
-            const eraYears = Number(eraMinutes) / (60 * 24 * 365.25);
-            let eraStr;
-            if (eraYears >= 1e9) {
-                eraStr = (eraYears / 1e9).toFixed(1) + ' billion years';
-            } else if (eraYears >= 1e6) {
-                eraStr = (eraYears / 1e6).toFixed(1) + ' million years';
-            } else if (eraYears >= 1000) {
-                eraStr = (eraYears / 1000).toFixed(1) + ' thousand years';
-            } else {
-                eraStr = eraYears.toFixed(1) + ' years';
-            }
-            eraInfo.innerHTML = `Signature: P=<span class="highlight">${sigP}</span> N=${sigN}<br>Era length: ${eraStr}`;
+            // Simple formula: k = minute * P + N
+            // P detectable from k-delta, full PERIOD preserved
+            eraInfo.innerHTML = `Signature: P=<span class="highlight">${sigP}</span> N=${sigN}`;
         }
     }
 
@@ -417,13 +401,10 @@
             el.style.backgroundColor = colors[cellWeight];
         }
 
-        // Update minute counter with era info
+        // Update minute counter with signature info
         let counterText = `Minute: ${minute} | Second: ${currentSecond}`;
         if (sigP > 1n) {
-            const eraLen = CLOCK_PERIOD / sigP;
-            const localEra = (minute / eraLen) % sigP;
-            const currentEra = (localEra + sigN) % sigP;  // N is starting era
-            counterText += ` | Era: ${currentEra}/${sigP}`;
+            counterText += ` | Signature: N=${sigN}`;
         }
         document.getElementById('minuteCounter').textContent = counterText;
 
