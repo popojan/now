@@ -43,6 +43,10 @@ test_video "IMG_6743.MOV" "29458875" "1970-01-0100:00:00"
 # Ancient date test (Year 0 = 1 B.C. in ISO 8601)
 test_video "IMG_6746.MOV" "1065579753" "0000-01-0100:00:00"
 
+# Signature encoding test (P=8191, N=1983)
+# Raw k = minute * P + N, decoded minutes = (k - N) / P = 29465913
+test_video "IMG_6782.MOV" "241355295366" "1970-01-0100:00:00"
+
 echo
 echo "=== Results ==="
 echo "Passed: $PASS"

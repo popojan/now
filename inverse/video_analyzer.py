@@ -1328,27 +1328,26 @@ def analyze_video(video_path, tolerance=80, verbose=False):
         # video that spans one or more minute boundaries. Merge all minute data.
 
         # Build a lookup by clock_second from all minutes
+        # obs is indexed by clock second: obs[sec] = observation for second sec
         # Prefer data from earlier minutes (more likely to be from the target minute k)
         second_to_obs = {}
-        first_start = None
         for min_idx in sorted(all_observations_by_minute.keys()):
-            obs, start = all_observations_by_minute[min_idx]
-            if first_start is None:
-                first_start = start
-            for i in range(60):
-                clock_sec = (start + i) % 60
-                if obs[i] and clock_sec not in second_to_obs:
-                    second_to_obs[clock_sec] = obs[i]
+            obs, _ = all_observations_by_minute[min_idx]
+            for sec in range(60):
+                if obs[sec] and sec not in second_to_obs:
+                    second_to_obs[sec] = obs[sec]
 
-        # Build merged array starting from first minute's start
-        start0 = first_start if first_start is not None else 0
+        # start_second is the video's starting clock second (from frame_to_second)
+        start_second = frame_to_second[0] if frame_to_second else 0
+
+        # Build merged array in observation order starting from start_second
+        # (all_observations[0] = observation for start_second)
         merged = []
         for i in range(60):
-            clock_sec = (start0 + i) % 60
-            merged.append(second_to_obs.get(clock_sec, set()))
+            sec = (start_second + i) % 60
+            merged.append(second_to_obs.get(sec, set()))
 
         all_observations = merged
-        start_second = start0
     else:
         # True multi-minute video - use the most complete minute
         # (usually minute 0 is partial if video started mid-minute)

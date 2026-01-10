@@ -317,13 +317,15 @@ def main():
         for i, obs in enumerate(observations[:5]):
             print(f"  Second {i}: {sorted(obs)}")
 
-    # Detect signature period P from multi-minute data (if available)
+    # Detect signature period P and best k from multi-minute data (if available)
     all_minutes = metadata.get('all_minutes', {})
     detected_sig_period = args.sig_period  # User override takes precedence
+    multi_best_k = None
+    multi_best_coverage = 0
 
-    if detected_sig_period is None and len(all_minutes) >= 2:
-        multi_P, multi_N, multi_k_values = detect_sig_period_from_multi_minute(all_minutes)
-        if multi_P > 1:
+    if all_minutes:
+        multi_P, multi_N, multi_k_values, multi_best_k, multi_best_coverage = detect_sig_period_from_multi_minute(all_minutes)
+        if detected_sig_period is None and multi_P > 1:
             detected_sig_period = multi_P
             print(f"\nDetected signature from multi-minute analysis: P={multi_P}, N={multi_N}")
             if args.verbose:
@@ -348,6 +350,17 @@ def main():
         if num_corrected > 0:
             distances = [c.distance for c in corrections if not c.is_anchor]
             print(f"  Error correction: {anchor_count} anchors, {num_corrected} corrected (distances: {distances})")
+
+    # Use multi-minute best k only if it has PERFECT coverage (60/60)
+    # This handles collisions where spanning detection finds an ambiguous k
+    # but avoids using incorrect k from partial observations with errors
+    if multi_best_k is not None and multi_best_coverage == 60 and match_count < 60:
+        if args.verbose:
+            print(f"  Using multi-minute k (perfect {multi_best_coverage}/60 vs spanning {match_count}/60)")
+        k = multi_best_k
+        match_count = multi_best_coverage
+        # For multi-minute k, start_second is 0 (aligned minute)
+        start_second = 0
 
     # If no valid state found, try lower thresholds with autodetection
     if k is None:

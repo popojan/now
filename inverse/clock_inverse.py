@@ -909,17 +909,21 @@ def detect_sig_period_from_multi_minute(all_minutes_data):
         all_minutes_data: dict mapping minute_idx -> (observations_list, start_second)
                          where observations_list[sec] = observation for second sec
 
-    Returns (detected_P, detected_N, k_values) where:
+    Returns (detected_P, detected_N, k_values, best_k, best_coverage) where:
         - detected_P: signature period (1 if not detected)
         - detected_N: signature value
         - k_values: list of k values for each minute (for verification)
+        - best_k: k value from minute with highest coverage (None if no good minute)
+        - best_coverage: number of valid observations for best_k minute
     """
-    if not all_minutes_data or len(all_minutes_data) < 2:
-        return 1, 0, []
+    if not all_minutes_data:
+        return 1, 0, [], None, 0
 
-    # Compute k for each minute with good coverage
+    # Compute k for each minute, tracking coverage
     k_values = []
     minute_indices = []
+    best_k = None
+    best_coverage = 0
 
     for min_idx in sorted(all_minutes_data.keys()):
         obs_list, start_sec = all_minutes_data[min_idx]
@@ -936,16 +940,20 @@ def detect_sig_period_from_multi_minute(all_minutes_data):
             else:
                 indices.append(0)
 
-        if non_empty < 50:  # Need good coverage
-            continue
-
         k = inverse_perm(indices)
         if k is not None:
-            k_values.append(k)
-            minute_indices.append(min_idx)
+            # Track best single-minute result
+            if non_empty > best_coverage:
+                best_k = k
+                best_coverage = non_empty
+
+            # Only include in delta analysis if good coverage
+            if non_empty >= 50:
+                k_values.append(k)
+                minute_indices.append(min_idx)
 
     if len(k_values) < 2:
-        return 1, 0, k_values
+        return 1, 0, k_values, best_k, best_coverage
 
     # Compute deltas between consecutive minutes
     deltas = []
@@ -974,7 +982,7 @@ def detect_sig_period_from_multi_minute(all_minutes_data):
     else:
         detected_N = 0
 
-    return detected_P, detected_N, k_values
+    return detected_P, detected_N, k_values, best_k, best_coverage
 
 
 def detect_sig_period_from_spanning(observed_cells_list):
