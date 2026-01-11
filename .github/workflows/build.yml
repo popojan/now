@@ -30,8 +30,8 @@ jobs:
       - name: Build (Unix)
         if: runner.os != 'Windows'
         run: |
-          mkdir -p bin
-          cc -Os -Wall -o bin/${{ matrix.output }} src/core.c src/render.c src/now.c
+          make
+          cp bin/now bin/${{ matrix.output }}
 
       - name: Setup MSVC
         if: runner.os == 'Windows'
@@ -41,7 +41,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           mkdir bin
-          cl /O2 /Fe:bin/${{ matrix.output }} src/core.c src/render.c src/now.c
+          cl /O2 /Fe:bin/${{ matrix.output }} src/core.c src/core8.c src/render.c src/now.c
 
       - name: Test
         run: bin/${{ matrix.output }} -h
