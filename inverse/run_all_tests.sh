@@ -58,6 +58,9 @@ test_video "IMG_6782.MOV" "241355295366" "1970-01-0100:00:00" "8191" "1983"
 # Monochrome red with signature (tests time-flow based empty color detection)
 test_video "IMG_6789.MOV" "36381401836815" "1970-01-0100:00:00" "1234567" "196"
 
+# Wallpaper Engine recording with signature
+test_video "IMG_6791.MOV" "248953580" "1983-01-0100:00:00" "11" "7"
+
 echo
 echo "=== Results ==="
 echo "Passed: $PASS"

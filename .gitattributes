@@ -3,3 +3,4 @@
 inverse/* linguist-vendored
 test_videos/IMG_6789.MOV filter=lfs diff=lfs merge=lfs -text
 test_videos/IMG_6782.MOV filter=lfs diff=lfs merge=lfs -text
+test_videos/IMG_6791.MOV filter=lfs diff=lfs merge=lfs -text

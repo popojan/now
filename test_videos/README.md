@@ -96,6 +96,16 @@ Videos recorded before this change will show the local time origin when analyzed
 - **Expected Result**: 60/60 seconds matched
 - **Notes**: Tests time-flow based empty color detection for monochrome schemes where filled and empty cells have similar total area over time. The analyzer detects the correct "empty" color by checking which color assignment produces forward-flowing time (increasing cell sums).
 
+### IMG_6791.MOV (Wallpaper Engine Recording)
+- **Characteristics**: Screen recording from Wallpaper Engine with signature
+- **Recorded**: 2026-01-11 19:22:39 CET
+- **Clock Origin**: 1983-01-01 00:00:00 UTC
+- **Expected k**: 248,953,580
+- **Expected P**: 11
+- **Expected N**: 7
+- **Expected Result**: 60/60 seconds matched
+- **Notes**: First test from Wallpaper Engine; validates the modernized wallpaper with signature support.
+
 ## Running Tests
 
 ```bash
