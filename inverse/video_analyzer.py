@@ -842,6 +842,64 @@ def detect_empty_color(cell_colors):
     return np.array([v + 10 for v in most_frequent], dtype=np.uint8)
 
 
+def detect_empty_color_by_time_flow(warped_frames, all_cell_colors):
+    """
+    Detect empty color using time-flow direction as tiebreaker.
+
+    In non-monochrome setups, empty color is most frequent and easily detected.
+    In monochrome setups, filled and empty have similar total area, so we use
+    time-flow direction to distinguish:
+    - Filled cells: sum increases 0→59 (forward time)
+    - Empty cells: sum decreases 60→1 (backward time)
+    """
+    quantized = (np.array(all_cell_colors) // 20) * 20
+    color_counts = {}
+    for c in quantized:
+        key = tuple(c)
+        color_counts[key] = color_counts.get(key, 0) + 1
+
+    sorted_colors = sorted(color_counts.items(), key=lambda x: -x[1])
+    if len(sorted_colors) < 2:
+        return np.array([v + 10 for v in sorted_colors[0][0]], dtype=np.uint8)
+
+    top1_key, top1_count = sorted_colors[0]
+    top2_key, top2_count = sorted_colors[1]
+
+    # If top color is clearly dominant (>1.5x second), use it (non-monochrome case)
+    if top1_count > top2_count * 1.5:
+        return np.array([v + 10 for v in top1_key], dtype=np.uint8)
+
+    # Similar frequency (monochrome case) - use time-flow to break tie
+    color_candidates = [np.array([v + 10 for v in c[0]], dtype=np.uint8)
+                       for c in sorted_colors[:2]]
+
+    best_empty = color_candidates[0]
+    best_flow_score = -float('inf')
+
+    for candidate_empty in color_candidates:
+        test_tol = find_adaptive_threshold(warped_frames[:min(60, len(warped_frames))], candidate_empty)
+        sums = []
+        for warped in warped_frames[:min(90, len(warped_frames))]:
+            visible = get_visible_cells_warped(warped, candidate_empty, test_tol)
+            sums.append(sum(visible) % 60)
+
+        # Forward time = increasing sums (positive flow_score)
+        flow_score = 0
+        for i in range(1, len(sums)):
+            diff = sums[i] - sums[i-1]
+            if diff < -30:
+                diff += 60
+            elif diff > 30:
+                diff -= 60
+            flow_score += diff
+
+        if flow_score > best_flow_score:
+            best_flow_score = flow_score
+            best_empty = candidate_empty
+
+    return best_empty
+
+
 def get_empty_color_candidates(cell_colors, max_candidates=3):
     """Get multiple empty color candidates for validation testing."""
     all_colors_array = np.array(cell_colors)
@@ -1037,15 +1095,8 @@ def analyze_video(video_path, tolerance=80, verbose=False):
                 color = sample_cell_color_warped(warped, cell_id)
                 all_cell_colors.append(color)
 
-        # Use quantized color detection across all frames (like old version)
-        all_colors_array = np.array(all_cell_colors)
-        quantized = (all_colors_array // 20) * 20
-        color_counts = {}
-        for c in quantized:
-            key = tuple(c)
-            color_counts[key] = color_counts.get(key, 0) + 1
-        most_frequent = max(color_counts, key=color_counts.get)
-        empty_color = np.array([v + 10 for v in most_frequent], dtype=np.uint8)
+        # Detect empty color using time-flow direction as tiebreaker for monochrome
+        empty_color = detect_empty_color_by_time_flow(warped_frames, all_cell_colors)
 
         # Find adaptive threshold from score distribution
         adaptive_tol = find_adaptive_threshold(warped_frames, empty_color)
@@ -1112,8 +1163,8 @@ def analyze_video(video_path, tolerance=80, verbose=False):
             for cell_id in CELL_LAYOUT.keys():
                 all_cell_colors.append(sample_cell_color_warped(warped, cell_id))
 
-        # Detect empty color
-        empty_color = detect_empty_color(all_cell_colors)
+        # Detect empty color using time-flow direction as tiebreaker for monochrome
+        empty_color = detect_empty_color_by_time_flow(warped_frames, all_cell_colors)
 
         # Find adaptive threshold from score distribution
         adaptive_tol = find_adaptive_threshold(warped_frames, empty_color)

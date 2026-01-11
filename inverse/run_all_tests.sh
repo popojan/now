@@ -51,9 +51,12 @@ test_video "IMG_6743.MOV" "29458875" "1970-01-0100:00:00" "1" "0"
 # Standard encoding: P=1, N=0
 test_video "IMG_6746.MOV" "1065579753" "0000-01-0100:00:00" "1" "0"
 
-# Signature encoding test
-# Raw k = minute * P + N, decoded minutes = (k - N) / P = 29465913
+# Signature encoding tests
+# Raw k = minute * P + N, decoded minutes = (k - N) / P
 test_video "IMG_6782.MOV" "241355295366" "1970-01-0100:00:00" "8191" "1983"
+
+# Monochrome red with signature (tests time-flow based empty color detection)
+test_video "IMG_6789.MOV" "36381401836815" "1970-01-0100:00:00" "1234567" "196"
 
 echo
 echo "=== Results ==="
