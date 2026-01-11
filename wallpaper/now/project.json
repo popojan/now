@@ -1,0 +1,155 @@
+{
+	"contentrating" : "Everyone",
+	"description" : "Animated clock with mondrianesque design, albeit with adjustable colors. The basic period is apparently 60 seconds, however no two minutes are the same! The actual period of the clock is (2^30)(3^16) minutes, which is more than 6 times the estimated age of the Universe. To avoid network calls the clock resorts to using system time instead of more appropriate International Atomic Time (TAI).",
+	"file" : "now.html",
+	"general" : 
+	{
+		"properties" : 
+		{
+			"backgroundcolor" : 
+			{
+				"index" : 0,
+				"order" : 100,
+				"text" : "Background Color",
+				"type" : "color",
+				"value" : "0.5647058823529412 0.5647058823529412 0.5647058823529412"
+			},
+			"bordercolor" : 
+			{
+				"index" : 4,
+				"order" : 104,
+				"text" : "Border Color",
+				"type" : "color",
+				"value" : "0.11764705882352941 0.11764705882352941 0.11764705882352941"
+			},
+			"borderwidth" : 
+			{
+				"fraction" : true,
+				"index" : 3,
+				"max" : 1,
+				"min" : 0,
+				"order" : 103,
+				"precision" : 3,
+				"step" : 0.01,
+				"text" : "Border Width",
+				"type" : "slider",
+				"value" : 0.75
+			},
+			"color1" : 
+			{
+				"index" : 11,
+				"order" : 111,
+				"text" : "Color 1",
+				"type" : "color",
+				"value" : "0.18823529411764706 0.18823529411764706 0.18823529411764706"
+			},
+			"color12" : 
+			{
+				"index" : 7,
+				"order" : 107,
+				"text" : "Color 12",
+				"type" : "color",
+				"value" : "0 0 1"
+			},
+			"color15" : 
+			{
+				"index" : 6,
+				"order" : 106,
+				"text" : "Color 15",
+				"type" : "color",
+				"value" : "1 0 0"
+			},
+			"color2" : 
+			{
+				"index" : 10,
+				"order" : 110,
+				"text" : "Color 2",
+				"type" : "color",
+				"value" : "1 1 0"
+			},
+			"color20" : 
+			{
+				"index" : 5,
+				"order" : 105,
+				"text" : "Color 20",
+				"type" : "color",
+				"value" : "1 1 0"
+			},
+			"color4" : 
+			{
+				"index" : 9,
+				"order" : 109,
+				"text" : "Color 4",
+				"type" : "color",
+				"value" : "0.18823529411764706 0.18823529411764706 0.18823529411764706"
+			},
+			"color6" : 
+			{
+				"index" : 8,
+				"order" : 108,
+				"text" : "Color 6",
+				"type" : "color",
+				"value" : "0 0 1"
+			},
+			"emptycolor" : 
+			{
+				"index" : 2,
+				"order" : 102,
+				"text" : "Empty Color",
+				"type" : "color",
+				"value" : "1 1 1"
+			},
+			"origin" :
+			{
+				"index" : 12,
+				"order" : 112,
+				"text" : "Origin (YYYY-MM-DDTHH:MM:SSZ)",
+				"type" : "textinput",
+				"value" : ""
+			},
+			"signaturep" :
+			{
+				"index" : 13,
+				"order" : 113,
+				"text" : "Signature P",
+				"type" : "textinput",
+				"value" : "1"
+			},
+			"signaturen" :
+			{
+				"index" : 14,
+				"order" : 114,
+				"text" : "Signature N",
+				"type" : "textinput",
+				"value" : "0"
+			},
+			"schemecolor" : 
+			{
+				"order" : 0,
+				"text" : "ui_browse_properties_scheme_color",
+				"type" : "color",
+				"value" : "0.5019607843137255 0.5019607843137255 0.5019607843137255"
+			},
+			"shadowcolor" : 
+			{
+				"index" : 1,
+				"order" : 101,
+				"text" : "Shadow Color",
+				"type" : "color",
+				"value" : "0.4392156862745098 0.4392156862745098 0.4392156862745098"
+			}
+		}
+	},
+	"preview" : "preview.jpg",
+	"ratingsex" : "none",
+	"ratingviolence" : "none",
+	"snapshotformat" : -1,
+	"snapshotoverlay" : "",
+	"tags" : [ "Abstract" ],
+	"title" : "Mondrianesque Clock",
+	"type" : "web",
+	"version" : 2,
+	"visibility" : "public",
+	"workshopid" : "3125524524",
+	"workshopurl" : "steam://url/CommunityFilePage/3125524524"
+}
