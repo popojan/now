@@ -77,6 +77,25 @@ Videos recorded before this change will show the local time origin when analyzed
 - **Expected Result**: 60/60 seconds matched
 - **Notes**: Tests overflow handling for dates before year 1; origin uses ISO 8601 extended format
 
+### IMG_6782.MOV (Multi-minute Signature Test)
+- **Characteristics**: Multi-minute recording with signature encoding (P, N parameters)
+- **Recorded**: Properly mounted (not handheld) for stable detection
+- **Clock Origin**: 1970-01-01 00:00:00 UTC (Unix epoch)
+- **Expected P**: 8191
+- **Expected N**: 1983
+- **Expected Result**: 60/60 seconds matched per minute, signature detected
+- **Notes**: Tests multi-minute signature detection; requires 2+ minutes to detect P/N values
+
+### IMG_6789.MOV (Monochrome Red with Signature)
+- **Characteristics**: Monochrome red color scheme with signature encoding
+- **Recorded**: 2026-01-11 14:16:42 CET
+- **Clock Origin**: 1970-01-01 00:00:00 UTC (Unix epoch)
+- **Expected k**: 36,381,401,836,815
+- **Expected P**: 1234567
+- **Expected N**: 196
+- **Expected Result**: 60/60 seconds matched
+- **Notes**: Tests time-flow based empty color detection for monochrome schemes where filled and empty cells have similar total area over time. The analyzer detects the correct "empty" color by checking which color assignment produces forward-flowing time (increasing cell sums).
+
 ## Running Tests
 
 ```bash
