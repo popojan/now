@@ -44,7 +44,9 @@ function page(s) {
 		'else if(!/^\\d+$/.test(s.P)||s.P.replace(/^0+/,"")==="")e="P must be a positive integer";' +
 		'else if(!/^\\d+$/.test(s.N))e="N must be a non-negative integer";' +
 		'if(e){document.getElementById("err").textContent=e;return;}' +
-		'location.href="pebblejs://close#"+encodeURIComponent(JSON.stringify(s));};' +
+		// the emulator passes return_to; the phone app expects pebblejs://close#
+		'var r=new URLSearchParams(location.search).get("return_to")||"pebblejs://close#";' +
+		'location.href=r+encodeURIComponent(JSON.stringify(s));};' +
 		'</script></body></html>';
 }
 
