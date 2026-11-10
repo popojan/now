@@ -1,0 +1,36 @@
+{
+  "name": "now",
+  "author": "Jan Popelka",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "Now",
+    "uuid": "31a8c742-7af2-494b-ba2a-ef42304b656d",
+    "projectType": "moddable",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": [
+      "ORIGIN",
+      "P",
+      "N",
+      "OFFSET"
+    ],
+    "resources": {
+      "media": []
+    },
+    "capabilities": [
+      "configurable"
+    ]
+  }
+}
