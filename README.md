@@ -11,7 +11,9 @@ The clock face consists of 7 rectangular cells with areas 1, 2, 4, 6, 12, 15, an
 ## Project Structure
 
 - `src/` - C terminal implementation
-- `web/` - Clock webpage (HTML/CSS/JS)
+- `web/` - Clock webpage (HTML/CSS/JS), live at [hraj.si/now](https://hraj.si/now/)
+- `wallpaper/` - [Wallpaper Engine](https://steamcommunity.com/sharedfiles/filedetails/?id=3125524524) version with adjustable colors
+- `pebble/` - Watchface for Pebble Time 2 and Round 2 ([README](pebble/README.md))
 - `inverse/` - Python video analyzer (reconstructs clock origin from video recordings)
 - `tests/` - Test scripts
 
