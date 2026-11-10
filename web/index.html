@@ -2,66 +2,84 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <link rel="shortcut icon" href="/favicon.png" type="image/x-icon" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <title>Now</title>
+    <meta name="description" content="A Mondrian composition that tells the time. Each second lights a different subset of seven rectangles — a pattern that does not repeat for 88 billion years.">
+    <link rel="canonical" href="https://hraj.si/now/">
+    <script>if (window.top !== window.self) document.documentElement.className += " embedded";</script>
     <style>
-        body { background-color: #DDDDDD; }
-        tr { height: 10%; padding: 0; margin: 0;}
-        td { border: 1vh solid #303030; text-align: center; vertical-align: center; padding:0; margin:0;}
-        td.c20 { width: 66.6667%; height: 50%;  background-color: rgba(255,255,0,1.0);}
-        td.c15 { width: 50%; height: 50%; background-color: rgba(255,0,0,1.0); }
-        td.c12 { width: 33.3334%; height: 60%; background-color: rgba(0,0,255,1.0); }
-        td.c6 { width: 50%; height: 20%; background-color: rgba(0,0,255,1.0); }
-        td.c4 { width: 33.3334%; height: 20%; background-color: rgba(30,30,30,1.0); }
-        td.c2 { width: 16.6667%; height: 20%;  background-color: rgba(255,255,0,1.0); }
-        td.c1 { width: 16.6667%; height: 10%; background-color: rgba(30,30,30,1.0); }
-        table {
-            border-collapse: collapse;
-            table-layout: fixed;
-            width: 36vh;
-            height: 60vh;
-            margin: 0;
-            padding: 0;
-            color: rgba(0,0,0,0.5);
-            font-family: sans-serif;
-            font-weight: bold;
-            font-size: 250%;
-            box-shadow: 1vh 1vh 2vh #A0A0A0;
-            background-color: #FFFFFF;
-        }
+        body { background-color: #909090; margin: 0; }
+        /* V ramu (dlazdice rozcestniku) nema smysl GitHub roh o velikosti nehtu. */
+        .embedded .github-corner { display: none; }
+        /* V ramu je ciferník 36x60vh RAMU, tedy pri dlazdici 640x360 jen
+           216 px vysoky -- proti statickemu obrazku, orezanemu tesne, to
+           vypadalo o tretinu mensi.  A pozadi ladi s okolnimi dlazdicemi. */
+        .embedded body { background-color: #e8e8e8; }
+        .embedded .clock { width: 53vh; height: 88vh; }
+        .github-corner svg { position: fixed; right: 0; top: 0; z-index: 20;
+                mix-blend-mode: darken; color: #909090; fill: #303030; }
+        .github-corner:hover .octo-arm { animation: octocat-wave .56s; }
+        @keyframes octocat-wave { 0%,100%{transform:rotate(0)}
+          20%,60%{transform:rotate(-20deg)} 40%,80%{transform:rotate(10deg)} }
         .center {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            padding: 10px;
         }
+        .clock {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-template-rows: repeat(10, 1fr);
+            width: 36vh;
+            height: 60vh;
+            gap: 1vh;
+            padding: 1vh;
+            background-color: #1E1E1E;
+            box-shadow: 1vh 1vh 2vh #6F6F6F;
+        }
+        .cell {
+            background-color: #FFFFFF;
+        }
+        /* Cell positions: 6 columns × 10 rows */
+        .c20 { grid-column: 1 / 5; grid-row: 1 / 6; }   /* cols 1-4, rows 1-5 */
+        .c12 { grid-column: 5 / 7; grid-row: 1 / 7; }   /* cols 5-6, rows 1-6 */
+        .c15 { grid-column: 1 / 4; grid-row: 6 / 11; }  /* cols 1-3, rows 6-10 */
+        .c1  { grid-column: 4 / 5; grid-row: 6 / 7; }   /* col 4, row 6 */
+        .c2  { grid-column: 4 / 5; grid-row: 7 / 9; }   /* col 4, rows 7-8 */
+        .c4  { grid-column: 5 / 7; grid-row: 7 / 9; }   /* cols 5-6, rows 7-8 */
+        .c6  { grid-column: 4 / 7; grid-row: 9 / 11; }  /* cols 4-6, rows 9-10 */
+        /* Mondrian colors */
+        .c20 { background-color: rgba(255,255,0,1.0); }  /* Yellow */
+        .c15 { background-color: rgba(255,0,0,1.0); }    /* Red */
+        .c12 { background-color: rgba(0,0,255,1.0); }    /* Blue */
+        .c6  { background-color: rgba(0,0,255,1.0); }    /* Blue */
+        .c4  { background-color: rgba(48,48,48,1.0); }   /* Black */
+        .c2  { background-color: rgba(255,255,0,1.0); }  /* Yellow */
+        .c1  { background-color: rgba(48,48,48,1.0); }   /* Black */
     </style>
 </head>
 <body onclick="togglePeriod();">
+    <a class="github-corner" href="https://github.com/popojan/now" target="_blank" rel="noopener"
+       onclick="event.stopPropagation();" title="Fork me on GitHub">
+      <svg width="80" height="80" viewBox="0 0 250 250" aria-hidden="true">
+        <path d="M0 0h250v250"></path>
+        <path class="octo-arm" d="M127.4 110c-14.6-9.2-9.4-19.5-9.4-19.5 3-7 1.5-11 1.5-11-1-6.2 3-2 3-2 4 4.7 2 11 2 11-2.2 10.4 5 14.8 9 16.2" fill="currentColor" style="transform-origin:130px 110px;"></path>
+        <path class="octo-body" d="M113.2 114.3s3.6 1.6 4.7.6l15-13.7c3-2.4 6-3 8.2-2.7-8-11.2-14-25 3-41 4.7-4.4 10.6-6.4 16.2-6.4.6-1.6 3.6-7.3 11.8-10.7 0 0 4.5 2.7 6.8 16.5 4.3 2.7 8.3 6 12 9.8 3.3 3.5 6.7 8 8.6 12.3 14 3 16.8 8 16.8 8-3.4 8-9.4 11-11.4 11 0 5.8-2.3 11-7.5 15.5-16.4 16-30 9-40 .2 0 3-1 7-5.2 11l-13.3 11c-1 1 .5 5.3.8 5z" fill="currentColor"></path>
+      </svg>
+    </a>
     <div class="center">
-        <table>
-            <tr><td id="20" class="c20" rowspan="5" colspan="4"></td>
-                <td id="12" class="c12" rowspan="6" colspan="2"></td>
-            </tr>
-            <tr></tr>
-            <tr></tr>
-            <tr></tr>
-            <tr></tr>
-            <tr>
-                <td id="15" class="c15" rowspan="5" colspan="3"></td>
-                <td id="1" class="c1" rowspan="1" colspan="1"></td>
-            </tr>
-            <tr>
-                <td id="2" class="c2" rowspan="2" colspan="1"></td>
-                <td id="4" class="c4" rowspan="2" colspan="2"></td>
-            </tr>
-            <tr></tr>
-            <tr>
-                <td id="6" class="c6" rowspan="2" colspan="3"></td>
-            </tr>
-            <tr></tr>
-        </table>
+        <div class="clock">
+            <div class="cell c20" id="20"></div>
+            <div class="cell c12" id="12"></div>
+            <div class="cell c15" id="15"></div>
+            <div class="cell c1" id="1"></div>
+            <div class="cell c2" id="2"></div>
+            <div class="cell c4" id="4"></div>
+            <div class="cell c6" id="6"></div>
+        </div>
     </div>
 <script type="text/javascript">
     let ordering = {
@@ -131,6 +149,9 @@
     let offset; //years
     let tick = 1n; //minutes
     let period = 60n;
+    let sigP = 1n;  // Signature period (must be coprime with 60)
+    let sigN = 0n;  // Signature value (0 to P-1)
+    let monochrome = false;
     function togglePeriod() {
         if(tick <= 1n) {
             tick = 60n;
@@ -152,6 +173,11 @@
         tick = BigInt(param.get('period')||"1");
         period = BigInt(param.get('mod')||"60");
         monochrome = parseInt(param.get('mono')||"0")>0;
+        // Signature encoding: k_combined = minute * P + N
+        sigP = BigInt(param.get('P')||"1");
+        sigN = BigInt(param.get('N')||"0");
+        // Validate: N must be < P
+        if (sigN >= sigP) sigN = sigN % sigP;
     } catch (error) {
         console.log(error);
         origin = new Date(origin0);
@@ -159,10 +185,45 @@
         tick = 1n;
         period = 60n;
         monochrome = false;
+        sigP = 1n;
+        sigN = 0n;
+    }
+    // iOS Safari repaints changed cells as one merged rect; when its edge falls
+    // between device pixels it leaves a hairline across the tall 12-cell.
+    function snapClock() {
+        const clock = document.querySelector('.clock');
+        const center = clock.parentElement;
+        clock.style.cssText = center.style.cssText = '';
+        const dpr = window.devicePixelRatio || 1;
+        const snap = v => Math.max(1, Math.round(v * dpr)) / dpr;
+        const cs = getComputedStyle(clock);
+        const g = snap(parseFloat(cs.rowGap));
+        const col = snap((parseFloat(cs.width) - 5 * g) / 6);
+        const row = snap((parseFloat(cs.height) - 9 * g) / 10);
+        Object.assign(clock.style, {
+            gap: g + 'px', padding: g + 'px',
+            width: 6 * col + 5 * g + 'px', height: 10 * row + 9 * g + 'px',
+            gridTemplateColumns: `repeat(6, ${col}px)`,
+            gridTemplateRows: `repeat(10, ${row}px)`,
+        });
+        const root = document.documentElement;
+        Object.assign(center.style, {
+            transform: 'none',
+            left: Math.round((root.clientWidth - 6 * col - 7 * g) / 2 * dpr) / dpr + 'px',
+            top: Math.round((root.clientHeight - 10 * row - 11 * g) / 2 * dpr) / dpr + 'px',
+        });
+    }
+    snapClock();
+    window.addEventListener('resize', snapClock);
+    // Store original colors for each cell
+    const originalColors = {};
+    for(const i of [1, 2, 4, 6, 12, 15, 20]) {
+        const el = document.getElementById(i.toString());
+        originalColors[i] = getComputedStyle(el).backgroundColor;
     }
     if(monochrome) {
-        for(const el of document.getElementsByTagName("td")){
-            el.style.backgroundColor = "#eb0000";
+        for(const i of [1, 2, 4, 6, 12, 15, 20]) {
+            originalColors[i] = "#eb0000";
         }
     }
     function integerDigitsBasePad(n, base, width) {
@@ -196,24 +257,28 @@
         }
         return ret;
     }
+    const CLOCK_PERIOD = 46221064723759104n;
     setInterval(function() {
         let t = BigInt(Math.floor((Date.now() - origin)/1000.0));
         //t += tz * 60n;
-        t = (t + period * tick * 46221064723759104n + offset * 365n * 24n * 3600n) % (6046221064723759104n * period * tick);
-        let k = t / (period * tick);
+        t = (t + period * tick * CLOCK_PERIOD + offset * 365n * 24n * 3600n) % (60n * CLOCK_PERIOD * period * tick);
+        let minute = t / (period * tick);
+        // Signature encoding: k = minute * P + N
+        // P detectable from k-delta between consecutive minutes
+        // Full PERIOD preserved when P is coprime with 2 and 3
+        let k = (minute * sigP + sigN) % CLOCK_PERIOD;
         let tt = perm(k);
         let ord = (t / tick) % period;
         let s = ordering[ord][tt[ord]];
         for(const i of [1, 2, 4, 6, 12, 15, 20]) {
             let el = document.getElementById(i.toString());
             if(s.indexOf(i) > -1) {
-                el.style.opacity = "100%";
+                el.style.backgroundColor = originalColors[i];
             } else {
-                el.style.opacity = "0%";
+                el.style.backgroundColor = "#FFFFFF";
             }
         }
     }, 25);
 </script>
-<script type="text/javascript" src="/script/pocitadlo.js"></script>
 </body>
 </html>
