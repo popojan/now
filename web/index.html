@@ -152,13 +152,18 @@
     let sigP = 1n;  // Signature period (must be coprime with 60)
     let sigN = 0n;  // Signature value (0 to P-1)
     let monochrome = false;
+    // hours=12 (default): lit area = elapsed share of 12 hours, in 12-minute steps;
+    // hours=24: the original panel, hour 0-23 as a sum of weights.
+    // Minute and hour panels read local time; tz=utc shows the same to everyone.
+    const hours24 = new URLSearchParams(window.location.search).get('hours') === '24';
+    const tzUtc = new URLSearchParams(window.location.search).get('tz') === 'utc';
     function togglePeriod() {
         if(tick <= 1n) {
             tick = 60n;
             period = 60n;
         } else if(tick <= 60n) {
-            tick = 3600n;
-            period = 24n;
+            tick = hours24 ? 3600n : 720n;
+            period = hours24 ? 24n : 60n;
         } else {
             tick = 1n;
             period = 60n;
@@ -269,6 +274,14 @@
         let k = (minute * sigP + sigN) % CLOCK_PERIOD;
         let tt = perm(k);
         let ord = (t / tick) % period;
+        // the signature k stays absolute; only the value shown follows the wall clock
+        if (!tzUtc && tick > 1n) {
+            const d = new Date();
+            if (tick === 60n && period === 60n) ord = BigInt(d.getMinutes());
+            else if (tick === 3600n && period === 24n) ord = BigInt(d.getHours());
+            else if (tick === 720n && period === 60n)
+                ord = BigInt(Math.floor(((d.getHours() % 12) * 3600 + d.getMinutes() * 60 + d.getSeconds()) / 720));
+        }
         let s = ordering[ord][tt[ord]];
         for(const i of [1, 2, 4, 6, 12, 15, 20]) {
             let el = document.getElementById(i.toString());

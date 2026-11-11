@@ -95,4 +95,5 @@ See `test_videos/README.md` for expected origins and video characteristics.
 - `perm()` function generates pseudo-random permutations based on time
 - Click anywhere to cycle through display modes (minutes → hours → minutes)
 - DST handling is built into the timezone offset calculation
+- Time rule on all platforms (web, Wallpaper Engine, Pebble): the signature k counts from the UTC origin; the minute and hour panels show local wall time (web: `tz=utc` shows UTC instead). The hour panel is a 12-hour dial, lit area = elapsed share of 12 h in 12-minute steps; `hours=24` (setting on the other platforms) restores the original hour 0–23 as a sum
 - Clock origin is stored in UTC to be timezone-independent
