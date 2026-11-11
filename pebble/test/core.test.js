@@ -16,12 +16,14 @@ const perm = new Function('ordering',
 const CP = 46221064723759104n;
 
 // Wallpaper Engine's setInterval body plus the hraj.si offset term
-function reference(now, origin, offset, P, N, mode) {
-	const tick = [1n, 60n, 3600n][mode], period = [60n, 60n, 24n][mode];
+function reference(now, origin, offset, P, N, mode, hours24) {
+	const h24 = mode === 2 && hours24;
+	const tick = h24 ? 3600n : [1n, 60n, 720n][mode], period = h24 ? 24n : 60n;
 	let t = BigInt(Math.floor((now - origin) / 1000.0));
 	t = (t + period * tick * CP + offset * 365n * 24n * 3600n) % (60n * CP * period * tick);
 	const k = (t / (period * tick) * P + N % P) % CP, d = new Date(now);
-	const ord = mode === 0 ? (t / tick) % period : BigInt(mode === 1 ? d.getMinutes() : d.getHours());
+	const ord = mode === 0 ? (t / tick) % period : BigInt(mode === 1 ? d.getMinutes() : h24 ? d.getHours()
+		: Math.floor(((d.getHours() % 12) * 3600 + d.getMinutes() * 60 + d.getSeconds()) / 720));
 	return ordering[ord][perm(k)[ord]];
 }
 
@@ -37,7 +39,8 @@ for (let i = 0; i < 2000; i++) {
 		origin: origins[i % 4],
 		P: String([1n, 7n, 25n, 1000003n, big(12) * 6n + 1n][i % 5]),
 		N: String(big(14)),
-		offset: String([0n, 5n, -3n, 88000000000n, big(15)][(i >> 2) % 5])
+		offset: String([0n, 5n, -3n, 88000000000n, big(15)][(i >> 2) % 5]),
+		hours: (i >> 1) % 2 ? "24" : "12"
 	};
 	const cfg = C.parseConfig(s);
 	const base = i % 2 ? Date.parse(starts[i % 3]) + rnd() * 7.2e6 : Date.parse(starts[2]) + (rnd() - 0.5) * 4e11;
@@ -45,7 +48,7 @@ for (let i = 0; i < 2000; i++) {
 		const now = Math.floor(base + d * 37000);
 		const st = C.clockState(now, cfg, mode, new Date(now));
 		const got = C.CELLS.filter((c, b) => C.minuteMasks(st.a, st.b)[st.second] & (1 << b));
-		const exp = reference(now, cfg.origin, BigInt(s.offset), BigInt(s.P), BigInt(s.N), mode);
+		const exp = reference(now, cfg.origin, BigInt(s.offset), BigInt(s.P), BigInt(s.N), mode, s.hours === "24");
 		n++;
 		if (JSON.stringify(got) !== JSON.stringify(exp) && bad++ < 5) console.log("MISMATCH", s, now, mode, got, exp);
 	}

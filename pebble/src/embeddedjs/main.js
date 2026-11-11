@@ -63,13 +63,17 @@ function minuteMasks(a, b) {
 	});
 }
 
-// Display modes as in hraj.si / Wallpaper Engine: [tick (s), period]
-const MODES = [[1, 60], [60, 60], [3600, 24]]; // seconds, minutes in hour, hours in day
+// Display modes as in hraj.si / Wallpaper Engine: [tick (s), period]: seconds, minutes in
+// the hour, and hours as a 12-hour dial (lit area = elapsed share of 12 h, 12-minute steps)
+// or, with the hours24 setting, the original hour 0-23 as a sum of weights.
+const MODES = [[1, 60], [60, 60], [720, 60]];
+const HOURS24 = [3600, 24];
 
 // Mirrors hraj.si/now: k = (minute * P + N) mod 2^30*3^16, minute counted from origin (UTC).
 // Like Wallpaper Engine, the minute and hour modes show local time (phone timezone incl. DST).
 function clockState(nowMs, cfg, mode = 0, local = null) {
-	const [tick, period] = MODES[mode], q = tick * period;
+	const h24 = mode === 2 && cfg.hours24;
+	const [tick, period] = h24 ? HOURS24 : MODES[mode], q = tick * period;
 	const secs = Math.floor((nowMs - cfg.origin) / 1000);
 	const units = Math.floor(secs / q), perYear = 31536000 / q;
 	const mA = mod(units + mulmod(cfg.OA, perYear, A), A);
@@ -77,11 +81,12 @@ function clockState(nowMs, cfg, mode = 0, local = null) {
 	const kA = mod(mulmod(mA, cfg.PA, A) + cfg.NA, A);
 	const kB = mod(mulmod(mB, cfg.PB, B) + cfg.NB, B);
 	const ord = mode === 0 || !local ? mod(Math.floor(secs / tick), period)
-		: mode === 1 ? local.getMinutes() : local.getHours();
+		: mode === 1 ? local.getMinutes() : h24 ? local.getHours()
+		: Math.floor(((local.getHours() % 12) * 3600 + local.getMinutes() * 60 + local.getSeconds()) / 720);
 	return { a: mulmod(mod(kA - kB, A), INV_B, A), b: kB, second: ord };
 }
 
-const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0" };
+const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12" };
 const P_MAX = 900719925474099; // keeps strMod(N, P) exact
 
 // String settings -> residues; throws on invalid input.
@@ -90,17 +95,18 @@ function parseConfig(s) {
 	if (isNaN(origin)) throw new Error("bad origin");
 	if (!/^\d+$/.test(s.P) || !/^\d+$/.test(s.N) || !/^[+-]?\d+$/.test(s.offset))
 		throw new Error("P, N, offset must be integers (P, N >= 0)");
+	if (s.hours !== "12" && s.hours !== "24") throw new Error("hours must be 12 or 24");
 	const P = Number(s.P);
 	if (P < 1 || P > P_MAX) throw new Error("P must be 1.." + P_MAX);
 	const N = strMod(s.N, P); // hraj.si: N >= P -> N % P
 	return {
 		origin, PA: P % A, PB: P % B, NA: N % A, NB: N % B,
-		OA: strMod(s.offset, A), OB: strMod(s.offset, B)
+		OA: strMod(s.offset, A), OB: strMod(s.offset, B), hours24: s.hours === "24"
 	};
 }
 // --- end core ---
 
-const KEYS = ["ORIGIN", "P", "N", "OFFSET"];
+const KEYS = ["ORIGIN", "P", "N", "OFFSET", "HOURS"];
 
 function loadSettings() {
 	try {
@@ -223,7 +229,7 @@ new Message({
 		const msg = this.read();
 		const s = { ...DEFAULTS };
 		msg.forEach((value, key) => {
-			const name = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset" }[key];
+			const name = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset", HOURS: "hours" }[key];
 			if (name) s[name] = String(value);
 		});
 		try {

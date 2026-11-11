@@ -24,7 +24,8 @@
       "ORIGIN",
       "P",
       "N",
-      "OFFSET"
+      "OFFSET",
+      "HOURS"
     ],
     "resources": {
       "media": []

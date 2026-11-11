@@ -1,12 +1,13 @@
-// Phone side: settings page (origin, offset, signature P and N) sent to the watch.
-var DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0" };
+// Phone side: settings page (origin, offset, signature P and N, hour panel) sent to the watch.
+var DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12" };
 
 function load() {
 	try {
 		var s = JSON.parse(localStorage.getItem("now") || "{}");
 		return {
 			origin: s.origin || DEFAULTS.origin, P: s.P || DEFAULTS.P,
-			N: s.N || DEFAULTS.N, offset: s.offset || DEFAULTS.offset
+			N: s.N || DEFAULTS.N, offset: s.offset || DEFAULTS.offset,
+			hours: s.hours === "24" ? "24" : "12"
 		};
 	} catch (e) {
 		return DEFAULTS;
@@ -34,11 +35,15 @@ function page(s) {
 		'<small>signature period, coprime with 2 and 3 keeps the full period</small>' +
 		'<label>N</label><input id="N" inputmode="numeric" value="' + esc(s.N) + '">' +
 		'<small>signature value, 0 &le; N &lt; P</small>' +
+		'<label>hour panel</label><select id="hours" style="width:100%;font-size:16px;padding:8px">' +
+		'<option value="12"' + (s.hours === "24" ? '' : ' selected') + '>12-hour dial: lit area = share of 12 h</option>' +
+		'<option value="24"' + (s.hours === "24" ? ' selected' : '') + '>24 hours: hour as a sum of weights</option>' +
+		'</select>' +
 		'<div id="err"></div><button id="save">Save</button>' +
 		'<script>' +
 		'function v(id){return document.getElementById(id).value.trim();}' +
 		'document.getElementById("save").onclick=function(){' +
-		'var s={origin:v("origin"),offset:v("offset"),P:v("P"),N:v("N")},e="";' +
+		'var s={origin:v("origin"),offset:v("offset"),P:v("P"),N:v("N"),hours:v("hours")},e="";' +
 		'if(isNaN(Date.parse(s.origin)))e="origin is not a valid date";' +
 		'else if(!/^-?\\d+$/.test(s.offset))e="offset must be an integer";' +
 		'else if(!/^\\d+$/.test(s.P)||s.P.replace(/^0+/,"")==="")e="P must be a positive integer";' +
@@ -51,7 +56,7 @@ function page(s) {
 }
 
 function send(s) {
-	Pebble.sendAppMessage({ ORIGIN: s.origin, P: s.P, N: s.N, OFFSET: s.offset },
+	Pebble.sendAppMessage({ ORIGIN: s.origin, P: s.P, N: s.N, OFFSET: s.offset, HOURS: s.hours || "12" },
 		function () { console.log("settings sent"); },
 		function (e) { console.log("settings send failed: " + JSON.stringify(e)); });
 }
