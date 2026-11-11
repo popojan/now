@@ -91,7 +91,46 @@ def draw(place, W, H):
         legend.append(f"{sym[j]}={w}({a}x{b})")
     return "\n".join("    " + " ".join(r) for r in g) + "\n    " + " ".join(legend)
 
-MONDRIAN = ["#d40920", "#1356a2", "#f7d842", "#f2f2f2"]
+# same palette and colouring rule as web/custom.html
+MONDRIAN = ["#ffff00", "#ff0000", "#0000ff", "#303030"]
+BLACK = 3
+
+def adjacent(p, q):
+    """Cells (w, x, y, a, b) sharing a stretch of edge; corners don't count."""
+    _, x1, y1, a1, b1 = p
+    _, x2, y2, a2, b2 = q
+    ov = lambda s, l, t, m: min(s + l, t + m) - max(s, t) > 0
+    return ((x1 + a1 == x2 or x2 + a2 == x1) and ov(y1, b1, y2, b2)) or \
+           ((y1 + b1 == y2 or y2 + b2 == y1) and ov(x1, a1, x2, a2))
+
+def color_cells(place, k=4, fixed=None):
+    """Palette index per cell with no equal neighbours; `fixed` maps index to a preset colour."""
+    fixed = fixed or {}
+    order = sorted((i for i in range(len(place)) if i not in fixed), key=lambda i: -place[i][0])
+    col = [fixed.get(i, -1) for i in range(len(place))]
+    def rec(r):
+        if r == len(order):
+            return True
+        i = order[r]
+        for d in range(k):
+            c = (r + d) % k
+            if any(col[j] == c and adjacent(place[i], place[j]) for j in range(len(place))):
+                continue
+            col[i] = c
+            if rec(r + 1):
+                return True
+        col[i] = -1
+        return False
+    if not rec(0):
+        raise ValueError(f"no {k}-colouring")
+    return col
+
+def mondrian_colors(place):
+    """The 1x1 cell is black, as on the original face, unless 1-cells touch."""
+    try:
+        return color_cells(place, len(MONDRIAN), {i: BLACK for i, p in enumerate(place) if p[0] == 1})
+    except ValueError:
+        return color_cells(place, len(MONDRIAN))
 
 def svg(tilings, size=320, cols=3):
     """tilings: list of (title, subtitle, place, W, H); returns an SVG string, one panel per tiling."""
@@ -102,15 +141,16 @@ def svg(tilings, size=320, cols=3):
         ox = pad + (i % cols) * (size + pad)
         oy = pad + (i // cols) * (size + pad + cap)
         p = [f'<g transform="translate({ox},{oy})">']
-        for j, (w, x, y, a, b) in enumerate(sorted(place, key=lambda q: -q[0])):
+        colours = mondrian_colors(place)
+        for (w, x, y, a, b), c in zip(place, colours):
             p.append(f'<rect x="{x*u:.1f}" y="{y*u:.1f}" width="{a*u:.1f}" height="{b*u:.1f}" '
-                     f'fill="{MONDRIAN[j % len(MONDRIAN)]}"/>')
+                     f'fill="{MONDRIAN[c]}"/>')
         # faint unit grid so cell dimensions can be read off
         for c in range(1, W):
             p.append(f'<line x1="{c*u:.1f}" y1="0" x2="{c*u:.1f}" y2="{H*u:.1f}" stroke="#000" stroke-opacity=".12" stroke-width=".5"/>')
         for r in range(1, H):
             p.append(f'<line x1="0" y1="{r*u:.1f}" x2="{W*u:.1f}" y2="{r*u:.1f}" stroke="#000" stroke-opacity=".12" stroke-width=".5"/>')
-        for w, x, y, a, b in place:
+        for (w, x, y, a, b), c in zip(place, colours):
             p.append(f'<rect x="{x*u:.1f}" y="{y*u:.1f}" width="{a*u:.1f}" height="{b*u:.1f}" '
                      f'fill="none" stroke="#111" stroke-width="{max(1.5, u/5):.1f}"/>')
             # shrink the label to the cell width (~0.6 em per character)
@@ -121,7 +161,7 @@ def svg(tilings, size=320, cols=3):
                 fs = min(22, b * u * 0.45, a * u * 0.85 / (0.6 * len(label)))
             if fs >= 5:
                 p.append(f'<text x="{(x+a/2)*u:.1f}" y="{(y+b/2)*u:.1f}" font-size="{fs:.1f}" '
-                         f'text-anchor="middle" dominant-baseline="central">{label}</text>')
+                         f'text-anchor="middle" dominant-baseline="central"{' fill="#fff"' if c == BLACK else ''}>{label}</text>')
         p.append(f'<text x="0" y="{H*u + 18:.1f}" font-size="13">{title}</text>')
         p.append(f'<text x="0" y="{H*u + 34:.1f}" font-size="11" fill="#555">{W}×{H} grid · period {subtitle} cycles of {W*H} states</text>')
         p.append("</g>")

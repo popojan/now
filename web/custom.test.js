@@ -6,7 +6,7 @@ const path = require('path');
 const assert = require('assert');
 const html = fs.readFileSync(path.join(__dirname, 'custom.html'), 'utf8');
 const core = html.split('// --- core (shared with web/custom.test.js) ---')[1].split('// --- end core ---')[0];
-const C = new Function(core + '; return { parseFace, buildOrdering, buildRadix, choices, faceState };')();
+const C = new Function(core + '; return { parseFace, buildOrdering, buildRadix, choices, faceState, colorCells, mondrianColors, adjacent, LEGACY };')();
 
 const idx = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const ordering = eval('(' + idx.match(/let ordering = (\{[\s\S]*?\});/)[1] + ')');
@@ -75,4 +75,11 @@ assert.notStrictEqual(a, b);
 for (const bad of [['6x10', '20.0.0.4.5'], ['2x2', '2.0.0.2.1,2.0.0.2.1'], ['3x1', '3.0.0.3.1']]) {
     assert.throws(() => C.buildOrdering(C.parseFace(...bad)));
 }
-console.log('420-state face: period 2^88*3^2, 1/7 s states, minute mode and validation ok');
+// no two neighbouring cells share a colour, the default face's hand-picked colours included
+const noClash = (cells, col) => cells.every((c, i) => cells.every((o, j) => j <= i || !C.adjacent(c, o) || col[i] !== col[j]));
+const fc = C.mondrianColors(f.cells);
+assert(noClash(f.cells, fc));
+assert.strictEqual(fc[f.cells.findIndex(c => c[0] === 1)], 3);  // 1x1 is black
+assert(noClash(C.LEGACY.cells, C.LEGACY.cells.map(c => C.LEGACY.colors[c[0]])));
+assert(C.adjacent([1, 0, 0, 1, 1], [1, 1, 0, 1, 1]) && !C.adjacent([1, 0, 0, 1, 1], [1, 1, 1, 1, 1]));
+console.log('420-state face: period 2^88*3^2, 1/7 s states, minute mode, validation and colouring ok');
