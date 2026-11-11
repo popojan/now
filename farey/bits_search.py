@@ -46,12 +46,12 @@ def aspect_cost(a, b):
 
 TILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tile")
 
-def best_tiling(ws, W, H, cap=None):
+def best_tiling(ws, W, H, cap=None, nocut=False):
     """Cheapest exact tiling of W x H (sum of |log aspect| over cells), via ./tile."""
-    if not os.path.exists(TILE):
+    if not os.path.exists(TILE) or os.path.getmtime(TILE) < os.path.getmtime(TILE + ".c"):
         subprocess.run(["gcc", "-O2", "-o", TILE, TILE + ".c", "-lm"], check=True)
     env = dict(os.environ, **({"TILE_MAX_COST": str(cap)} if cap is not None else {}))
-    out = subprocess.run([TILE, str(W), str(H), *map(str, ws)], capture_output=True, text=True, env=env).stdout.split("\n")
+    out = subprocess.run([TILE, *(["-n"] if nocut else []), str(W), str(H), *map(str, ws)], capture_output=True, text=True, env=env).stdout.split("\n")
     if out[0] == "none":
         return None
     return float(out[0]), [tuple(map(int, l.split())) for l in out[1:] if l]
@@ -121,6 +121,7 @@ def main():
     ap.add_argument("--smooth", type=int, default=0, help="largest allowed prime factor of any weight")
     ap.add_argument("--tile", type=int, default=0, help="find the N sets with the cheapest tiling (exact)")
     ap.add_argument("--max-grid-ratio", type=float, default=2.0)
+    ap.add_argument("--no-cut", action="store_true", help="Mondrian rule: no straight line may split the tiling in two")
     ap.add_argument("--sort", default="period", choices=["period", "balance", "tile", "gpf", "div"])
     ap.add_argument("--top", type=int, default=20)
     ap.add_argument("--show", type=int, default=0, help="draw the best N tilings")
@@ -160,7 +161,7 @@ def main():
             best = None
             for W, H in grids(S, args.max_grid_ratio):
                 c = min(x for x in (cap, best[0] if best else None) if x is not None) if (cap or best) else None
-                t = best_tiling(r["ws"], W, H, c)
+                t = best_tiling(r["ws"], W, H, c, args.no_cut)
                 if t and (best is None or t[0] < best[0]):
                     best = (t[0], W, H, t[1])
             r["tile"] = best
