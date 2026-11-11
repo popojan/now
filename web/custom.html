@@ -8,12 +8,14 @@
         body { background-color: #909090; margin: 0; height: 100vh; display: flex;
                align-items: center; justify-content: center; font-family: sans-serif; }
         svg { display: block; filter: drop-shadow(1vh 1vh 1vh #6F6F6F); }
+        #busy { color: #333; }
         #error { color: #300; background: #fff; padding: 1em 1.5em; max-width: 40em; white-space: pre-wrap; }
     </style>
 </head>
 <body onclick="toggleMode();">
 <svg id="clock" hidden></svg>
 <div id="error" hidden></div>
+<div id="busy">tiling…</div>
 <script id="core">
 // --- core (shared with web/custom.test.js) ---
 // Default face: the 7 cells of index.html, with its hand-made ordering so that
@@ -133,34 +135,62 @@ function tile(weights, W, H, nocut, cap = Infinity, ratio = 1) {
     return bestp && { cost: best, cells: bestp };
 }
 
-// Face from weights alone: the cheapest tiling of any W x H = sum with H/W <= 2,
-// with the Mondrian rule unless no such tiling exists.  The default weights keep
-// index.html's own layout.
-function faceFromBits(bits, ratio = 1) {
+const LEGACY_WEIGHTS = LEGACY.cells.map(c => c[0]).sort((a, b) => a - b).join();
+const sortedWeights = cells => cells.map(c => c[0]).sort((a, b) => a - b).join();
+const transpose = face => ({ W: face.H, H: face.W, cells: face.cells.map(([w, x, y, a, b]) => [w, y, x, b, a]) });
+
+// Face from weights alone: the cheapest tiling, with the Mondrian rule unless no
+// such tiling exists.  Without shape, any W x H = sum with H/W <= 2 (portrait);
+// with shape (width/height), the grid nearest that shape, landscape included, and
+// the next nearest only if nothing fits.  The default weights keep index.html's
+// layout (turned on its side for a landscape grid) while ratio is 1.
+function faceFromBits(bits, ratio = 1, shape = null) {
     const ws = bits.split(",").map(Number);
     if (ws.some(w => !Number.isInteger(w) || w < 1)) throw new Error("bad bits " + bits);
-    const sorted = ws.slice().sort((a, b) => a - b).join();
-    if (ratio === 1 && sorted === LEGACY.cells.map(c => c[0]).sort((a, b) => a - b).join()) return parseFace(null, null);
     const S = ws.reduce((a, b) => a + b, 0);
     let reach = 0;
     for (const w of ws.slice().sort((a, b) => a - b)) {
         if (w > reach + 1) throw new Error(`no subset of the weights sums to ${reach + 1}: not complete`);
         reach += w;
     }
-    for (const nocut of [true, false]) {
-        let best = null;
-        for (let W = Math.floor(Math.sqrt(S)); W >= 1; W--) {  // squarest first: an early bound prunes the rest
-            if (S % W || S / W > 2 * W) continue;
-            const t = tile(ws, W, S / W, nocut, best ? best.cost : Infinity, ratio);
-            if (t) best = { ...t, W, H: S / W };
+    const grids = [];
+    for (let W = 1; W <= S; W++) if (S % W === 0) grids.push([W, S / W]);
+    const legacy = ratio === 1 && ws.slice().sort((a, b) => a - b).join() === LEGACY_WEIGHTS;
+    const best = (cands, nocut) => {
+        let b = null;
+        for (const [W, H] of cands) {  // tile portrait, turn afterwards
+            const t = tile(ws, Math.min(W, H), Math.max(W, H), nocut, b ? b.cost : Infinity, ratio);
+            if (t) b = { cost: t.cost, face: W <= H ? { W, H, cells: t.cells } : transpose({ W: H, H: W, cells: t.cells }) };
         }
-        if (best) return { W: best.W, H: best.H, cells: best.cells, nocut };
+        return b && b.face;
+    };
+    if (!shape) {
+        if (legacy) return parseFace(null, null);
+        // squarest first: an early bound prunes the rest
+        const cands = grids.filter(([W, H]) => W <= H && H <= 2 * W).reverse();
+        const f = best(cands, true) || best(cands, false);
+        if (f) return f;
+        throw new Error(`no rectangle W x H = ${S} with H/W <= 2 fits these cells; try shape= or pass grid= and cells=`);
     }
-    throw new Error(`no rectangle W x H = ${S} with H/W <= 2 fits these cells; pass grid= and cells= instead`);
+    const off = ([W, H]) => Math.abs(Math.log(W / H / shape));
+    // equally far (1:1 between 20x21 and 21x20): portrait first
+    grids.sort((p, q) => (Math.abs(off(p) - off(q)) > 1e-9 ? off(p) - off(q) : 0) || (p[0] - q[0]));
+    for (const g of grids) {
+        if (legacy && g[0] === 6) return parseFace(null, null);
+        if (legacy && g[0] === 10) return transpose(parseFace(null, null));
+        const f = best([g], true) || best([g], false);
+        if (f) return f;
+    }
+    throw new Error("no grid fits these cells");
 }
 
+// index.html's hand-made ordering (and colours) apply to its weights in any layout
 function isLegacy(face) {
-    return JSON.stringify(face.cells) === JSON.stringify(LEGACY.cells) && face.W === 6 && face.H === 10;
+    return sortedWeights(face.cells) === LEGACY_WEIGHTS;
+}
+function isLegacyLayout(face) {
+    const same = f => f.W === 6 && f.H === 10 && JSON.stringify(f.cells) === JSON.stringify(LEGACY.cells);
+    return same(face) || same(transpose(face));
 }
 
 // cells sharing a stretch of edge (corners don't count)
@@ -265,80 +295,92 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod) {
 <script>
     const param = new URLSearchParams(window.location.search);
     const svg = document.getElementById("clock");
-    let ctx, modes, mode = 0, face, rects;
+    let ctx, modes, mode = 0, face, rects, shape = null;
     function fail(msg) {
         const e = document.getElementById("error");
         e.textContent = msg + "\n\nExamples: ?bits=1,2,4,8,15,30,56,108,196&speed=7\n" +
             "?grid=6x10&cells=20.0.0.4.5,12.4.0.2.6,15.0.5.3.5,1.3.5.1.1,2.3.6.1.2,4.4.6.2.2,6.3.8.3.2";
         e.hidden = false;
     }
-    try {
-        // ratio=1.618 or 3:2, the ideal cell shape for bits= (default 1, square cells)
-        const rm = /^(\d+(?:\.\d+)?)(?::(\d+(?:\.\d+)?))?$/.exec(param.get("ratio") || "1");
-        if (!rm) throw new Error("bad ratio " + param.get("ratio"));
-        const ratio = Math.max(+rm[1] / +(rm[2] || 1), +(rm[2] || 1) / +rm[1]);
-        face = param.has("bits") ? faceFromBits(param.get("bits"), ratio) : parseFace(param.get("grid"), param.get("cells"));
-        if (param.has("bits")) console.log(`grid=${face.W}x${face.H}&cells=${face.cells.map(c => c.join(".")).join(",")}`);
-        const S = face.W * face.H;
-        const ordering = buildOrdering(face);
-        const P = BigInt(param.get("P") || "1");
-        ctx = {
-            S, ordering, radix: buildRadix(ordering),
-            originMs: +new Date(param.get("origin") || "1970-01-01T00:00:00Z"),
-            offsetYears: BigInt(param.get("offset") || "0"),
-            P, N: BigInt(param.get("N") || "0") % P,
-        };
-        if (isNaN(ctx.originMs)) throw new Error("bad origin");
-        // speed: states per second (S = 420, speed = 7 runs one cycle per minute);
-        // period/mod as in index.html: seconds per state and states per cycle
-        const speed = BigInt(param.get("speed") || "1");
-        const first = [BigInt(param.get("period") || "1"), speed, BigInt(param.get("mod") || String(S))];
-        modes = [first, [60n, 1n, 60n], [3600n, 1n, 24n]];
-        if (first[0] < 1n || speed < 1n || first[2] < 1n || first[2] > BigInt(S)) throw new Error(`need period, speed >= 1 and 1 <= mod <= ${S}`);
-    } catch (e) {
-        fail(e.message);
-    }
     function toggleMode() { if (modes) mode = (mode + 1) % modes.length; }
+    // tiling a wide shape= can take a second or two: show a note first
+    setTimeout(start, 50);
+    function start() {
+        try {
+            // ratio=1.618 or 3:2, the ideal cell shape for bits= (default 1, square cells)
+            const rm = /^(\d+(?:\.\d+)?)(?::(\d+(?:\.\d+)?))?$/.exec(param.get("ratio") || "1");
+            if (!rm) throw new Error("bad ratio " + param.get("ratio"));
+            const ratio = Math.max(+rm[1] / +(rm[2] || 1), +(rm[2] || 1) / +rm[1]);
+            // shape=16:9, width:height of the whole face: nearest grid, then units stretched to fit exactly
+            const sm = /^(\d+(?:\.\d+)?)(?::(\d+(?:\.\d+)?))?$/.exec(param.get("shape") || "1");
+            if (!sm) throw new Error("bad shape " + param.get("shape"));
+            shape = param.has("shape") ? +sm[1] / +(sm[2] || 1) : null;
+            const bits = param.get("bits") || (shape && !param.has("cells") ? LEGACY_WEIGHTS : null);
+            face = bits ? faceFromBits(bits, ratio, shape) : parseFace(param.get("grid"), param.get("cells"));
+            if (param.has("bits")) console.log(`grid=${face.W}x${face.H}&cells=${face.cells.map(c => c.join(".")).join(",")}`);
+            const S = face.W * face.H;
+            const ordering = buildOrdering(face);
+            const P = BigInt(param.get("P") || "1");
+            ctx = {
+                S, ordering, radix: buildRadix(ordering),
+                originMs: +new Date(param.get("origin") || "1970-01-01T00:00:00Z"),
+                offsetYears: BigInt(param.get("offset") || "0"),
+                P, N: BigInt(param.get("N") || "0") % P,
+            };
+            if (isNaN(ctx.originMs)) throw new Error("bad origin");
+            // speed: states per second (S = 420, speed = 7 runs one cycle per minute);
+            // period/mod as in index.html: seconds per state and states per cycle
+            const speed = BigInt(param.get("speed") || "1");
+            const first = [BigInt(param.get("period") || "1"), speed, BigInt(param.get("mod") || String(S))];
+            modes = [first, [60n, 1n, 60n], [3600n, 1n, 24n]];
+            if (first[0] < 1n || speed < 1n || first[2] < 1n || first[2] > BigInt(S)) throw new Error(`need period, speed >= 1 and 1 <= mod <= ${S}`);
+        } catch (e) {
+            fail(e.message);
+        }
 
-    function draw() {
-        const { W, H, cells } = face;
-        // line width in grid units; 0.2 on 6x10 matches index.html, then scales with the grid
-        const line = +(param.get("line") || 0.02 * Math.max(W, H));
-        svg.setAttribute("viewBox", `${-line / 2} ${-line / 2} ${W + line} ${H + line}`);
-        svg.innerHTML = `<rect x="${-line / 2}" y="${-line / 2}" width="${W + line}" height="${H + line}" fill="#1e1e1e"/>`;
-        const custom = (param.get("colors") || "").split(",").filter(Boolean).map(c => "#" + c);
-        const auto = mondrianColors(cells);
-        const colors = cells.map((c, i) => custom[i] || (isLegacy(face) ? LEGACY.colors[c[0]] : PALETTE[auto[i]]));
-        if (+(param.get("mono") || 0) > 0) colors.fill("#eb0000");
-        rects = cells.map(([w, x, y, a, b], i) => {
-            const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-            Object.entries({ x: x + line / 2, y: y + line / 2, width: a - line, height: b - line, fill: "#fff" })
-                .forEach(([k, v]) => r.setAttribute(k, v));
-            r.dataset.on = colors[i];
-            svg.appendChild(r);
-            return r;
-        });
-        const fit = () => {
-            const ar = (W + line) / (H + line);
-            const h = Math.min(window.innerHeight * 0.62, window.innerWidth * 0.9 / ar);
-            svg.style.height = h + "px";
-            svg.style.width = h * ar + "px";
-        };
-        fit();
-        window.addEventListener("resize", fit);
-        svg.hidden = false;
-    }
-    if (modes) {
-        draw();
-        let last = null;
-        setInterval(() => {
-            const [num, den, mod] = modes[mode];
-            const on = new Set(faceState(ctx, Date.now(), num, den, mod));
-            const key = [...on].join();
-            if (key === last) return;
-            last = key;
-            rects.forEach((r, i) => r.setAttribute("fill", on.has(i) ? r.dataset.on : "#fff"));
-        }, 25);
+        function draw() {
+            const { W, H, cells } = face;
+            // line width in grid units; 0.2 on 6x10 matches index.html, then scales with the grid
+            const line = +(param.get("line") || 0.02 * Math.max(W, H));
+            // horizontal stretch of a unit: uniform, so areas stay proportional to the weights
+            const sx = shape ? shape * H / W : 1;
+            svg.setAttribute("viewBox", `${-line / 2} ${-line / 2} ${W * sx + line} ${H + line}`);
+            svg.innerHTML = `<rect x="${-line / 2}" y="${-line / 2}" width="${W * sx + line}" height="${H + line}" fill="#1e1e1e"/>`;
+            const custom = (param.get("colors") || "").split(",").filter(Boolean).map(c => "#" + c);
+            const auto = mondrianColors(cells);
+            const colors = cells.map((c, i) => custom[i] || (isLegacyLayout(face) ? LEGACY.colors[c[0]] : PALETTE[auto[i]]));
+            if (+(param.get("mono") || 0) > 0) colors.fill("#eb0000");
+            rects = cells.map(([w, x, y, a, b], i) => {
+                const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                Object.entries({ x: x * sx + line / 2, y: y + line / 2, width: a * sx - line, height: b - line, fill: "#fff" })
+                    .forEach(([k, v]) => r.setAttribute(k, v));
+                r.dataset.on = colors[i];
+                svg.appendChild(r);
+                return r;
+            });
+            const fit = () => {
+                const ar = (W * sx + line) / (H + line);
+                const h = Math.min(window.innerHeight * 0.62, window.innerWidth * 0.9 / ar);
+                svg.style.height = h + "px";
+                svg.style.width = h * ar + "px";
+            };
+            fit();
+            window.addEventListener("resize", fit);
+            svg.hidden = false;
+        }
+        if (modes) {
+            draw();
+            let last = null;
+            setInterval(() => {
+                const [num, den, mod] = modes[mode];
+                const on = new Set(faceState(ctx, Date.now(), num, den, mod));
+                const key = [...on].join();
+                if (key === last) return;
+                last = key;
+                rects.forEach((r, i) => r.setAttribute("fill", on.has(i) ? r.dataset.on : "#fff"));
+            }, 25);
+        }
+        document.getElementById("busy").hidden = true;
     }
 </script>
 </body>

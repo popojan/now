@@ -6,7 +6,7 @@ const path = require('path');
 const assert = require('assert');
 const html = fs.readFileSync(path.join(__dirname, 'custom.html'), 'utf8');
 const core = html.split('// --- core (shared with web/custom.test.js) ---')[1].split('// --- end core ---')[0];
-const C = new Function(core + '; return { parseFace, buildOrdering, buildRadix, choices, faceState, colorCells, mondrianColors, adjacent, LEGACY, tile, faceFromBits };')();
+const C = new Function(core + '; return { parseFace, buildOrdering, buildRadix, choices, faceState, colorCells, mondrianColors, adjacent, LEGACY, tile, faceFromBits, transpose };')();
 
 const idx = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const ordering = eval('(' + idx.match(/let ordering = (\{[\s\S]*?\});/)[1] + ')');
@@ -111,3 +111,23 @@ assert.strictEqual(`${g.W}x${g.H} ${g.cells.map(c => c.join('.')).join(',')}`,
     '20x21 195.0.0.15.13,112.0.13.14.8,55.15.0.5.11,28.16.14.4.7,15.15.11.5.3,8.14.15.2.4,4.14.19.2.2,2.14.13.1.2,1.15.14.1.1');
 assert.throws(() => C.faceFromBits('1,2,5'), /not complete/);
 console.log(`bits= tiling matches tile.c (${Date.now() - t0} ms)`);
+
+// shape=: the default face turned landscape still matches index.html (ordering follows the weights)
+const land = C.faceFromBits('1,2,4,6,12,15,20', 1, 16 / 9);
+assert.deepStrictEqual(land, C.transpose(C.parseFace(null, null)));
+assert.deepStrictEqual(C.faceFromBits('1,2,4,6,12,15,20', 1, 0.6), C.parseFace(null, null));
+{
+    const ctxL = context(land, 0, 0n, 1n, 0n);
+    for (let i = 0; i < 2000; i++) {
+        const now = Math.floor(rnd() * 3e12);
+        const got = C.faceState(ctxL, now, 1n, 1n, 60n).map(i => land.cells[i][0]).sort((a, b) => a - b);
+        assert.deepStrictEqual(got, reference(now, 0, 0n, 1n, 0n, 1n, 60n));
+    }
+}
+for (const [shape, want] of [[16 / 9, '28x15'], [9 / 16, '15x28'], [1, '20x21'], [21 / 9, '30x14']]) {
+    const t1 = Date.now();
+    const fs = C.faceFromBits('1,2,4,8,15,30,56,108,196', 1, shape);
+    assert.strictEqual(`${fs.W}x${fs.H}`, want);
+    console.log(`  shape ${shape.toFixed(2)}: ${fs.W}x${fs.H} in ${Date.now() - t1} ms`);
+}
+console.log('shape= ok');
