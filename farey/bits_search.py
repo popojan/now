@@ -123,7 +123,7 @@ def svg(tilings, size=320, cols=3):
                 p.append(f'<text x="{(x+a/2)*u:.1f}" y="{(y+b/2)*u:.1f}" font-size="{fs:.1f}" '
                          f'text-anchor="middle" dominant-baseline="central">{label}</text>')
         p.append(f'<text x="0" y="{H*u + 18:.1f}" font-size="13">{title}</text>')
-        p.append(f'<text x="0" y="{H*u + 34:.1f}" font-size="11" fill="#555">{W}×{H} grid · period {subtitle} minutes</text>')
+        p.append(f'<text x="0" y="{H*u + 34:.1f}" font-size="11" fill="#555">{W}×{H} grid · period {subtitle} cycles of {W*H} states</text>')
         p.append("</g>")
         panels.append("\n".join(p))
     n = len(tilings)
