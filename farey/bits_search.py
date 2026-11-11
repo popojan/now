@@ -38,6 +38,27 @@ def gpf(x):
         p += 1
     return max(best, x) if x > 1 else best
 
+def factor(x):
+    f, p = {}, 2
+    while p * p <= x:
+        while x % p == 0:
+            f[p] = f.get(p, 0) + 1
+            x //= p
+        p += 1
+    if x > 1:
+        f[x] = f.get(x, 0) + 1
+    return f
+
+SUP = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+
+def period_factors(c):
+    """Prime factorisation of the period, the product of per-second choice counts."""
+    f = {}
+    for x in c:
+        for p, e in factor(x).items():
+            f[p] = f.get(p, 0) + e
+    return " · ".join(f"{p}{str(e).translate(SUP) if e > 1 else ''}" for p, e in sorted(f.items()))
+
 def dims(w):
     return [(a, w // a) for a in range(1, w + 1) if w % a == 0]
 
@@ -73,10 +94,10 @@ def draw(place, W, H):
 MONDRIAN = ["#d40920", "#1356a2", "#f7d842", "#f2f2f2"]
 
 def svg(tilings, size=320, cols=3):
-    """tilings: list of (title, place, W, H); returns an SVG string, one panel per tiling."""
+    """tilings: list of (title, subtitle, place, W, H); returns an SVG string, one panel per tiling."""
     pad, cap = 20, 40
     panels = []
-    for i, (title, place, W, H) in enumerate(tilings):
+    for i, (title, subtitle, place, W, H) in enumerate(tilings):
         u = size / max(W, H)
         ox = pad + (i % cols) * (size + pad)
         oy = pad + (i // cols) * (size + pad + cap)
@@ -102,7 +123,7 @@ def svg(tilings, size=320, cols=3):
                 p.append(f'<text x="{(x+a/2)*u:.1f}" y="{(y+b/2)*u:.1f}" font-size="{fs:.1f}" '
                          f'text-anchor="middle" dominant-baseline="central">{label}</text>')
         p.append(f'<text x="0" y="{H*u + 18:.1f}" font-size="13">{title}</text>')
-        p.append(f'<text x="0" y="{H*u + 34:.1f}" font-size="11" fill="#555">{W}×{H} grid</text>')
+        p.append(f'<text x="0" y="{H*u + 34:.1f}" font-size="11" fill="#555">{W}×{H} grid · period {subtitle} minutes</text>')
         p.append("</g>")
         panels.append("\n".join(p))
     n = len(tilings)
@@ -144,6 +165,7 @@ def main():
         rows.append({
             "ws": ws,
             "period": sum(log2(x) for x in c[:S]),
+            "factors": period_factors(c[:S]),
             "gpf": max(gpf(w) for w in ws),
             "div": sum(S % w == 0 for w in ws),
             # cost of the squarest rectangle per cell, ignoring whether they tile
@@ -181,7 +203,7 @@ def main():
         print(draw(r["tile"][3], r["tile"][1], r["tile"][2]))
     if args.svg:
         with open(args.svg, "w") as f:
-            f.write(svg([(", ".join(map(str, r["ws"])) + f"  (cost {r['tile'][0]:.2f})", r["tile"][3], r["tile"][1], r["tile"][2])
+            f.write(svg([(", ".join(map(str, r["ws"])) + f"  (cost {r['tile'][0]:.2f})", r["factors"], r["tile"][3], r["tile"][1], r["tile"][2])
                          for r in shown]))
         print(f"\nwrote {args.svg} ({len(shown)} tilings)")
 
