@@ -2,7 +2,7 @@
 
 Never repeats for 88 billion years. Encodes recoverable origin and unique signature in every minute.
 
-A clock cycling through 60 states per minute, each a subset sum of {1, 2, 4, 6, 12, 15, 20}. These weights cover [Farey sequence](https://en.wikipedia.org/wiki/Farey_sequence) $F_6$ exactly. Period: $2^{30} \times 3^{16}$ minutes.
+A clock cycling through 60 states per minute, one per second, each a subset of cells with areas {1, 2, 4, 6, 12, 15, 20}. Their subset sums hit every integer 0–60, so second *s* is shown as cells totalling *s*. Since 60 = lcm(1, …, 6), every fraction of the [Farey sequence](https://en.wikipedia.org/wiki/Farey_sequence) $F_6$ (1/2, 1/3, 2/5, …) is also an exact share of the face. Period: $2^{30} \times 3^{16}$ minutes.
 
 ## How It Works
 
