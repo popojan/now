@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Now (nested)</title>
+    <style>
+        body { background-color: #909090; margin: 0; height: 100vh; display: flex; flex-direction: column;
+               align-items: center; justify-content: center; font-family: sans-serif; }
+        svg { display: block; height: 80vh; filter: drop-shadow(1vh 1vh 1vh #6F6F6F); }
+        #legend { margin-top: 2vh; font-size: 3vh; color: #222; font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body onclick="legend.hidden = !legend.hidden;">
+<svg id="clock" viewBox="-0.1 -0.1 6.2 10.2"></svg>
+<div id="legend" hidden></div>
+<script id="core">
+// --- core (shared with web/nested.test.js) ---
+// The 15-cell is 3x5, the whole 6x10 face at half scale, so each inner level is a
+// face drawn inside the 15-cell of the level around it.
+const CELLS = [1, 2, 4, 6, 12, 15, 20];
+const LAYOUT = { 20: [0, 0, 4, 5], 12: [4, 0, 2, 6], 15: [0, 5, 3, 5], 1: [3, 5, 1, 1], 2: [3, 6, 1, 2], 4: [4, 6, 2, 2], 6: [3, 8, 3, 2] };
+const COLORS = { 20: "#ffff00", 15: "#ff0000", 12: "#0000ff", 6: "#0000ff", 4: "#303030", 2: "#ffff00", 1: "#303030" };
+const TINT = "#ffb4b4";  // off cells of an inner face whose 15-cell is lit outside
+// index.html's ordering and perm(k)
+const ORDERING = [
+    [[1, 2, 4, 6, 12, 15, 20], []], [[1]], [[2]], [[1, 2]], [[4]], [[1, 4]], [[6], [2, 4]],
+    [[1, 6], [1, 2, 4]], [[2, 6]], [[1, 2, 6]], [[4, 6]], [[1, 4, 6]], [[12], [2, 4, 6]],
+    [[1, 12], [1, 2, 4, 6]], [[2, 12]], [[15], [1, 2, 12]], [[1, 15], [4, 12]], [[2, 15], [1, 4, 12]],
+    [[1, 2, 15], [6, 12], [2, 4, 12]], [[4, 15], [1, 6, 12], [1, 2, 4, 12]],
+    [[20], [1, 4, 15], [2, 6, 12]], [[1, 20], [6, 15], [2, 4, 15], [1, 2, 6, 12]],
+    [[2, 20], [1, 6, 15], [1, 2, 4, 15], [4, 6, 12]], [[1, 2, 20], [2, 6, 15], [1, 4, 6, 12]],
+    [[4, 20], [1, 2, 6, 15], [2, 4, 6, 12]], [[1, 4, 20], [4, 6, 15], [1, 2, 4, 6, 12]],
+    [[6, 20], [2, 4, 20], [1, 4, 6, 15]], [[1, 6, 20], [1, 2, 4, 20], [12, 15], [2, 4, 6, 15]],
+    [[1, 12, 15], [2, 6, 20], [1, 2, 4, 6, 15]], [[1, 2, 6, 20], [2, 12, 15]],
+    [[1, 2, 12, 15], [4, 6, 20]], [[1, 4, 6, 20], [4, 12, 15]],
+    [[12, 20], [1, 4, 12, 15], [2, 4, 6, 20]], [[1, 12, 20], [1, 2, 4, 6, 20], [6, 12, 15], [2, 4, 12, 15]],
+    [[2, 12, 20], [1, 6, 12, 15], [1, 2, 4, 12, 15]], [[15, 20], [1, 2, 12, 20], [2, 6, 12, 15]],
+    [[1, 15, 20], [4, 12, 20], [1, 2, 6, 12, 15]], [[2, 15, 20], [1, 4, 12, 20], [4, 6, 12, 15]],
+    [[1, 2, 15, 20], [6, 12, 20], [2, 4, 12, 20], [1, 4, 6, 12, 15]],
+    [[4, 15, 20], [1, 6, 12, 20], [1, 2, 4, 12, 20], [2, 4, 6, 12, 15]],
+    [[1, 4, 15, 20], [2, 6, 12, 20], [1, 2, 4, 6, 12, 15]], [[6, 15, 20], [2, 4, 15, 20], [1, 2, 6, 12, 20]],
+    [[1, 6, 15, 20], [1, 2, 4, 15, 20], [4, 6, 12, 20]], [[2, 6, 15, 20], [1, 4, 6, 12, 20]],
+    [[1, 2, 6, 15, 20], [2, 4, 6, 12, 20]], [[4, 6, 15, 20], [1, 2, 4, 6, 12, 20]], [[1, 4, 6, 15, 20]],
+    [[12, 15, 20], [2, 4, 6, 15, 20]], [[1, 12, 15, 20], [1, 2, 4, 6, 15, 20]], [[2, 12, 15, 20]],
+    [[1, 2, 12, 15, 20]], [[4, 12, 15, 20]], [[1, 4, 12, 15, 20]], [[6, 12, 15, 20], [2, 4, 12, 15, 20]],
+    [[1, 6, 12, 15, 20], [1, 2, 4, 12, 15, 20]], [[2, 6, 12, 15, 20]], [[1, 2, 6, 12, 15, 20]],
+    [[4, 6, 12, 15, 20]], [[1, 4, 6, 12, 15, 20]], [[2, 4, 6, 12, 15, 20]],
+];
+const CP = 46221064723759104n;  // 2^30 * 3^16
+function perm(k) {
+    k %= CP;
+    const k3 = (k / 1073741824n).toString(3).padStart(16, "0").split("").map(Number);
+    const rest = (k % 1073741824n).toString(2).padStart(30, "0").split("").map(Number);
+    const k2 = rest.slice(0, 18), k4 = [];
+    for (let i = 18; i < 30; i += 2) k4.push(rest[i] * 2 + rest[i + 1]);
+    return ORDERING.map(o => o.length === 1 ? 0 : o.length === 2 ? k2.shift() : o.length === 3 ? k3.shift() : k4.shift());
+}
+
+// Each level: seconds per step, steps per cycle, and how a step maps to a sum.
+// The cycle count is that level's k, so each level never repeats on its own scale.
+// Hours run 12 to a cycle as 5h: the lit area is h/12 of the face, like an hour hand.
+const UNITS = { s: [1, 60, 1], m: [60, 60, 1], h: [3600, 12, 5] };
+
+// localSecs: seconds since the epoch in local time; returns per level {unit, value, cells}
+function levelsAt(localSecs, levels) {
+    return levels.map(u => {
+        const [tick, mod, scale] = UNITS[u];
+        const step = Math.floor(localSecs / tick);
+        const value = ((step % mod) + mod) % mod, sum = value * scale;
+        const k = BigInt(Math.floor(step / mod));
+        return { unit: u, value, cells: ORDERING[sum][perm(k)[sum]] };
+    });
+}
+
+// SVG rects for the nested faces, outermost first; line width scales with each level
+function drawRects(states) {
+    const out = [];
+    let x0 = 0, y0 = 0, s = 1, off = "#ffffff";
+    states.forEach((st, i) => {
+        const last = i === states.length - 1, g = 0.2 * s, lit = new Set(st.cells);
+        const pad = i === 0 ? g / 2 : 0;  // outer frame as wide as a line
+        out.push({ x: x0 - pad, y: y0 - pad, w: 6 * s + 2 * pad, h: 10 * s + 2 * pad, fill: "#1e1e1e" });
+        for (const c of CELLS) {
+            if (c === 15 && !last) continue;
+            const [x, y, a, b] = LAYOUT[c];
+            out.push({ x: x0 + x * s + g / 2, y: y0 + y * s + g / 2, w: a * s - g, h: b * s - g, fill: lit.has(c) ? COLORS[c] : off });
+        }
+        if (!last) {
+            off = lit.has(15) ? TINT : "#ffffff";
+            const [x, y] = LAYOUT[15];
+            // inner cells start a half-line inside the 15-cell, so the line around the inner
+            // face is as wide as the outer lines; width binds, the spare height is centred
+            const inner = (3 * s - g) / 5.8, gi = 0.2 * inner;
+            x0 += x * s + g / 2 - gi / 2;
+            y0 += y * s + g / 2 - gi / 2 + (5 * s - g + gi - 10 * inner) / 2;
+            s = inner;
+        }
+    });
+    return out;
+}
+// --- end core ---
+</script>
+<script>
+    const param = new URLSearchParams(window.location.search);
+    const levels = (param.get("levels") || "h,m,s").split(",").filter(u => u in UNITS);
+    const svg = document.getElementById("clock"), legend = document.getElementById("legend");
+    if (!levels.length) levels.push("h", "m", "s");
+    let last = null;
+    function frame() {
+        // at=2026-11-11T10:42:17 freezes the clock at that local time
+        const now = param.has("at") ? new Date(param.get("at")) : new Date();
+        const local = Math.floor(now.getTime() / 1000) - now.getTimezoneOffset() * 60;
+        const states = levelsAt(local, levels);
+        const key = states.map(s => s.cells.join()).join("|");
+        if (key !== last) {
+            last = key;
+            svg.innerHTML = drawRects(states).map(r =>
+                `<rect x="${r.x.toFixed(4)}" y="${r.y.toFixed(4)}" width="${r.w.toFixed(4)}" height="${r.h.toFixed(4)}" fill="${r.fill}"/>`).join("");
+        }
+        legend.textContent = states.map(s => `${s.unit} ${s.unit === "h" ? (s.value || 12) : String(s.value).padStart(2, "0")}`).join("  ");
+    }
+    frame();
+    setInterval(frame, 100);
+</script>
+</body>
+</html>
