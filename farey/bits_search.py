@@ -78,7 +78,8 @@ def best_tiling(ws, W, H, cap=None, nocut=False):
     return float(out[0]), [tuple(map(int, l.split())) for l in out[1:] if l]
 
 def grids(S, max_ratio):
-    return [(W, S // W) for W in range(1, S + 1) if S % W == 0 and W <= S // W and S // W / W <= max_ratio]
+    # squarest first, as in web/custom.html: an early bound prunes the rest
+    return [(W, S // W) for W in range(int(S ** 0.5), 0, -1) if S % W == 0 and S // W / W <= max_ratio]
 
 def draw(place, W, H):
     g = [["?"] * W for _ in range(H)]

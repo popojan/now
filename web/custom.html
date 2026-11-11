@@ -73,6 +73,90 @@ function parseFace(grid, cells) {
     return { W, H, cells: cs };
 }
 
+// Port of farey/tile.c: exact tiling of W x H by one rectangle per weight, minimising
+// the sum of |log aspect|; nocut rejects tilings a straight line splits in two.
+// Returns {cost, cells} with cells [w, x, y, a, b] by decreasing w, or null.
+function tile(weights, W, H, nocut, cap = Infinity) {
+    if (W > 30) throw new Error("grid too wide to tile");
+    const ws = weights.slice().sort((a, b) => b - a), n = ws.length, full = (1 << W) - 1;
+    const opts = ws.map(w => {
+        const o = [];
+        for (let a = 1; a <= w; a++) if (w % a === 0 && a <= W && w / a <= H) o.push([a, w / a, Math.abs(Math.log(a / (w / a)))]);
+        return o.sort((p, q) => p[2] - q[2]);  // stable: equal costs keep narrower first, as in tile.c
+    });
+    if (opts.some(o => !o.length)) return null;
+    const lb = opts.map(o => o[0][2]);
+    const oa = opts.map(o => Int32Array.from(o, v => v[0])), ob = opts.map(o => Int32Array.from(o, v => v[1]));
+    const oc = opts.map(o => Float64Array.from(o, v => v[2]));
+    const rows = new Int32Array(H), used = new Uint8Array(n);
+    const px = new Int32Array(n), py = new Int32Array(n), pa = new Int32Array(n), pb = new Int32Array(n);
+    let best = cap, bestp = null;
+    const crossed = (lo, len, at) => {
+        for (let i = 0; i < n; i++) if (used[i] && lo[i] < at && at < lo[i] + len[i]) return true;
+        return false;
+    };
+    const rec = (cost, rest) => {
+        if (cost + rest >= best - 1e-12) return;
+        let y = 0;
+        while (y < H && rows[y] === full) y++;
+        if (nocut && y > 0 && y < H && !crossed(py, pb, y)) return;
+        if (y === H) {
+            if (nocut) for (let x = 1; x < W; x++) if (!crossed(px, pa, x)) return;
+            best = cost;
+            bestp = ws.map((w, i) => [w, px[i], py[i], pa[i], pb[i]]);
+            return;
+        }
+        const free = ~rows[y] & full, x = 31 - Math.clz32(free & -free);
+        let run = 0;
+        while (x + run < W && !(rows[y] >> (x + run) & 1)) run++;
+        for (let i = 0; i < n; i++) {
+            if (used[i] || (i > 0 && ws[i] === ws[i - 1] && !used[i - 1])) continue;
+            const A = oa[i], B = ob[i], Cc = oc[i];
+            for (let o = 0; o < A.length; o++) {
+                const a = A[o], b = B[o];
+                if (a > run || y + b > H) continue;
+                const m = ((1 << a) - 1) << x;
+                let ok = true;
+                for (let r = y; r < y + b; r++) if (rows[r] & m) { ok = false; break; }
+                if (!ok) continue;
+                for (let r = y; r < y + b; r++) rows[r] |= m;
+                used[i] = 1; px[i] = x; py[i] = y; pa[i] = a; pb[i] = b;
+                rec(cost + Cc[o], rest - lb[i]);
+                used[i] = 0;
+                for (let r = y; r < y + b; r++) rows[r] &= ~m;
+            }
+        }
+    };
+    rec(0, lb.reduce((s, v) => s + v, 0));
+    return bestp && { cost: best, cells: bestp };
+}
+
+// Face from weights alone: the cheapest tiling of any W x H = sum with H/W <= 2,
+// with the Mondrian rule unless no such tiling exists.  The default weights keep
+// index.html's own layout.
+function faceFromBits(bits) {
+    const ws = bits.split(",").map(Number);
+    if (ws.some(w => !Number.isInteger(w) || w < 1)) throw new Error("bad bits " + bits);
+    const sorted = ws.slice().sort((a, b) => a - b).join();
+    if (sorted === LEGACY.cells.map(c => c[0]).sort((a, b) => a - b).join()) return parseFace(null, null);
+    const S = ws.reduce((a, b) => a + b, 0);
+    let reach = 0;
+    for (const w of ws.slice().sort((a, b) => a - b)) {
+        if (w > reach + 1) throw new Error(`no subset of the weights sums to ${reach + 1}: not complete`);
+        reach += w;
+    }
+    for (const nocut of [true, false]) {
+        let best = null;
+        for (let W = Math.floor(Math.sqrt(S)); W >= 1; W--) {  // squarest first: an early bound prunes the rest
+            if (S % W || S / W > 2 * W) continue;
+            const t = tile(ws, W, S / W, nocut, best ? best.cost : Infinity);
+            if (t) best = { ...t, W, H: S / W };
+        }
+        if (best) return { W: best.W, H: best.H, cells: best.cells, nocut };
+    }
+    throw new Error(`no rectangle W x H = ${S} with H/W <= 2 fits these cells; pass grid= and cells= instead`);
+}
+
 function isLegacy(face) {
     return JSON.stringify(face.cells) === JSON.stringify(LEGACY.cells) && face.W === 6 && face.H === 10;
 }
@@ -113,7 +197,9 @@ function mondrianColors(cells) {
     try { return colorCells(cells, PALETTE.length, black); } catch (e) { return colorCells(cells, PALETTE.length); }
 }
 
-// ordering[s] lists the subsets (as cell indices) whose areas sum to s mod S
+// ordering[s] lists the subsets (as cell indices) whose areas sum to s mod S.
+// Bit j of the enumeration is the j-th smallest weight, so the time code
+// depends on the weights only, not on the layout or the order of cells=.
 function buildOrdering(face) {
     const S = face.W * face.H, n = face.cells.length;
     if (isLegacy(face)) {
@@ -122,12 +208,13 @@ function buildOrdering(face) {
         return LEGACY.ordering.map(opts => opts.map(sub => sub.map(w => idx[w])));
     }
     if (n > 20) throw new Error("at most 20 cells");
+    const bit = face.cells.map((c, i) => i).sort((i, j) => (face.cells[i][0] - face.cells[j][0]) || (i - j));
     const ord = Array.from({ length: S }, () => []);
-    ord[0].push([...Array(n).keys()]);  // full face first, like index.html
+    ord[0].push(bit.slice());  // full face first, like index.html
     for (let m = 0; m < (1 << n) - 1; m++) {
         let s = 0;
         const sub = [];
-        for (let i = 0; i < n; i++) if (m >> i & 1) { s += face.cells[i][0]; sub.push(i); }
+        for (let j = 0; j < n; j++) if (m >> j & 1) { s += face.cells[bit[j]][0]; sub.push(bit[j]); }
         ord[s].push(sub);
     }
     const gap = ord.findIndex(o => !o.length);
@@ -179,11 +266,13 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod) {
     let ctx, modes, mode = 0, face, rects;
     function fail(msg) {
         const e = document.getElementById("error");
-        e.textContent = msg + "\n\nExample: ?grid=6x10&cells=20.0.0.4.5,12.4.0.2.6,15.0.5.3.5,1.3.5.1.1,2.3.6.1.2,4.4.6.2.2,6.3.8.3.2";
+        e.textContent = msg + "\n\nExamples: ?bits=1,2,4,8,15,30,56,108,196&speed=7\n" +
+            "?grid=6x10&cells=20.0.0.4.5,12.4.0.2.6,15.0.5.3.5,1.3.5.1.1,2.3.6.1.2,4.4.6.2.2,6.3.8.3.2";
         e.hidden = false;
     }
     try {
-        face = parseFace(param.get("grid"), param.get("cells"));
+        face = param.has("bits") ? faceFromBits(param.get("bits")) : parseFace(param.get("grid"), param.get("cells"));
+        if (param.has("bits")) console.log(`grid=${face.W}x${face.H}&cells=${face.cells.map(c => c.join(".")).join(",")}`);
         const S = face.W * face.H;
         const ordering = buildOrdering(face);
         const P = BigInt(param.get("P") || "1");
@@ -194,14 +283,12 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod) {
             P, N: BigInt(param.get("N") || "0") % P,
         };
         if (isNaN(ctx.originMs)) throw new Error("bad origin");
-        // cycle: seconds per full pass through S states (S = 420, cycle = 60 ticks every 1/7 s);
-        // period/mod as in index.html override it with whole seconds per state
-        const cycleSec = BigInt(param.get("cycle") || "60");
-        const first = param.has("period") || param.has("mod")
-            ? [BigInt(param.get("period") || "1"), 1n, BigInt(param.get("mod") || String(S))]
-            : [cycleSec, BigInt(S), BigInt(S)];
+        // speed: states per second (S = 420, speed = 7 runs one cycle per minute);
+        // period/mod as in index.html: seconds per state and states per cycle
+        const speed = BigInt(param.get("speed") || "1");
+        const first = [BigInt(param.get("period") || "1"), speed, BigInt(param.get("mod") || String(S))];
         modes = [first, [60n, 1n, 60n], [3600n, 1n, 24n]];
-        if (first[0] < 1n || first[2] < 1n || first[2] > BigInt(S)) throw new Error(`need period >= 1 and 1 <= mod <= ${S}`);
+        if (first[0] < 1n || speed < 1n || first[2] < 1n || first[2] > BigInt(S)) throw new Error(`need period, speed >= 1 and 1 <= mod <= ${S}`);
     } catch (e) {
         fail(e.message);
     }
