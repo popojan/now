@@ -9,6 +9,6 @@ Tools for choosing cell weights like the clock's {1, 2, 4, 6, 12, 15, 20}.
 ```bash
 gcc -O2 -o farey_search farey_search.c && ./farey_search 7 7 420
 python3 bits_search.py 6 7 --distinct --divisors --tile 3 --sort tile --show 1   # picks the clock's weights
-python3 bits_search.py 7 9 --distinct --tile 10 --sort tile --show 3
+python3 bits_search.py 7 9 --distinct --tile 10 --sort tile --show 3 --svg f7.svg   # also draw them
 python3 bits_search.py 7 9 --distinct --smooth 5 --tile 5 --sort tile --show 1
 ```

@@ -70,6 +70,48 @@ def draw(place, W, H):
         legend.append(f"{sym[j]}={w}({a}x{b})")
     return "\n".join("    " + " ".join(r) for r in g) + "\n    " + " ".join(legend)
 
+MONDRIAN = ["#d40920", "#1356a2", "#f7d842", "#f2f2f2"]
+
+def svg(tilings, size=320, cols=3):
+    """tilings: list of (title, place, W, H); returns an SVG string, one panel per tiling."""
+    pad, cap = 20, 40
+    panels = []
+    for i, (title, place, W, H) in enumerate(tilings):
+        u = size / max(W, H)
+        ox = pad + (i % cols) * (size + pad)
+        oy = pad + (i // cols) * (size + pad + cap)
+        p = [f'<g transform="translate({ox},{oy})">']
+        for j, (w, x, y, a, b) in enumerate(sorted(place, key=lambda q: -q[0])):
+            p.append(f'<rect x="{x*u:.1f}" y="{y*u:.1f}" width="{a*u:.1f}" height="{b*u:.1f}" '
+                     f'fill="{MONDRIAN[j % len(MONDRIAN)]}"/>')
+        # faint unit grid so cell dimensions can be read off
+        for c in range(1, W):
+            p.append(f'<line x1="{c*u:.1f}" y1="0" x2="{c*u:.1f}" y2="{H*u:.1f}" stroke="#000" stroke-opacity=".12" stroke-width=".5"/>')
+        for r in range(1, H):
+            p.append(f'<line x1="0" y1="{r*u:.1f}" x2="{W*u:.1f}" y2="{r*u:.1f}" stroke="#000" stroke-opacity=".12" stroke-width=".5"/>')
+        for w, x, y, a, b in place:
+            p.append(f'<rect x="{x*u:.1f}" y="{y*u:.1f}" width="{a*u:.1f}" height="{b*u:.1f}" '
+                     f'fill="none" stroke="#111" stroke-width="{max(1.5, u/5):.1f}"/>')
+            # shrink the label to the cell width (~0.6 em per character)
+            label = f"{w} ({a}×{b})"
+            fs = min(22, b * u * 0.45, a * u * 0.85 / (0.6 * len(label)))
+            if fs < 9:
+                label = f"{w}"
+                fs = min(22, b * u * 0.45, a * u * 0.85 / (0.6 * len(label)))
+            if fs >= 5:
+                p.append(f'<text x="{(x+a/2)*u:.1f}" y="{(y+b/2)*u:.1f}" font-size="{fs:.1f}" '
+                         f'text-anchor="middle" dominant-baseline="central">{label}</text>')
+        p.append(f'<text x="0" y="{H*u + 18:.1f}" font-size="13">{title}</text>')
+        p.append(f'<text x="0" y="{H*u + 34:.1f}" font-size="11" fill="#555">{W}×{H} grid</text>')
+        p.append("</g>")
+        panels.append("\n".join(p))
+    n = len(tilings)
+    width = pad + min(n, cols) * (size + pad)
+    height = pad + ((n + cols - 1) // cols) * (size + pad + cap)
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+            f'font-family="sans-serif"><rect width="100%" height="100%" fill="#fff"/>\n'
+            + "\n".join(panels) + "\n</svg>\n")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("k", type=int)
@@ -82,6 +124,7 @@ def main():
     ap.add_argument("--sort", default="period", choices=["period", "balance", "tile", "gpf", "div"])
     ap.add_argument("--top", type=int, default=20)
     ap.add_argument("--show", type=int, default=0, help="draw the best N tilings")
+    ap.add_argument("--svg", help="also render the --show tilings to this SVG file")
     args = ap.parse_args()
     S = lcm(*range(1, args.k + 1))
     sets = complete_sets(S, args.n)
@@ -131,10 +174,15 @@ def main():
     for r in rows[:args.top]:
         t = f"tile {r['tile'][0]:.2f} on {r['tile'][1]}x{r['tile'][2]}" if r["tile"] else ""
         print(f"  {r['ws']}  period 2^{r['period']:.2f}  gpf {r['gpf']}  div {r['div']}/{len(r['ws'])}  balance {r['balance']:.2f}  {t}")
-    for r in rows[:args.show]:
-        if r["tile"]:
-            print(f"\n  {r['ws']}")
-            print(draw(r["tile"][3], r["tile"][1], r["tile"][2]))
+    shown = [r for r in rows[:args.show] if r["tile"]]
+    for r in shown:
+        print(f"\n  {r['ws']}")
+        print(draw(r["tile"][3], r["tile"][1], r["tile"][2]))
+    if args.svg:
+        with open(args.svg, "w") as f:
+            f.write(svg([(", ".join(map(str, r["ws"])) + f"  (cost {r['tile'][0]:.2f})", r["tile"][3], r["tile"][1], r["tile"][2])
+                         for r in shown]))
+        print(f"\nwrote {args.svg} ({len(shown)} tilings)")
 
 if __name__ == "__main__":
     main()
