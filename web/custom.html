@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Now (custom cells)</title>
+    <style>
+        body { background-color: #909090; margin: 0; height: 100vh; display: flex;
+               align-items: center; justify-content: center; font-family: sans-serif; }
+        svg { display: block; filter: drop-shadow(1vh 1vh 1vh #6F6F6F); }
+        #error { color: #300; background: #fff; padding: 1em 1.5em; max-width: 40em; white-space: pre-wrap; }
+    </style>
+</head>
+<body onclick="toggleMode();">
+<svg id="clock" hidden></svg>
+<div id="error" hidden></div>
+<script id="core">
+// --- core (shared with web/custom.test.js) ---
+// Default face: the 7 cells of index.html, with its hand-made ordering so that
+// both pages show the same subsets at the same time.
+const LEGACY = {
+    grid: [6, 10],
+    cells: [[20, 0, 0, 4, 5], [12, 4, 0, 2, 6], [15, 0, 5, 3, 5], [1, 3, 5, 1, 1],
+            [2, 3, 6, 1, 2], [4, 4, 6, 2, 2], [6, 3, 8, 3, 2]],
+    colors: {20: "#ffff00", 15: "#ff0000", 12: "#0000ff", 6: "#0000ff", 4: "#303030", 2: "#ffff00", 1: "#303030"},
+    ordering: [
+        [[1, 2, 4, 6, 12, 15, 20], []], [[1]], [[2]], [[1, 2]], [[4]], [[1, 4]], [[6], [2, 4]],
+        [[1, 6], [1, 2, 4]], [[2, 6]], [[1, 2, 6]], [[4, 6]], [[1, 4, 6]], [[12], [2, 4, 6]],
+        [[1, 12], [1, 2, 4, 6]], [[2, 12]], [[15], [1, 2, 12]], [[1, 15], [4, 12]], [[2, 15], [1, 4, 12]],
+        [[1, 2, 15], [6, 12], [2, 4, 12]], [[4, 15], [1, 6, 12], [1, 2, 4, 12]],
+        [[20], [1, 4, 15], [2, 6, 12]], [[1, 20], [6, 15], [2, 4, 15], [1, 2, 6, 12]],
+        [[2, 20], [1, 6, 15], [1, 2, 4, 15], [4, 6, 12]], [[1, 2, 20], [2, 6, 15], [1, 4, 6, 12]],
+        [[4, 20], [1, 2, 6, 15], [2, 4, 6, 12]], [[1, 4, 20], [4, 6, 15], [1, 2, 4, 6, 12]],
+        [[6, 20], [2, 4, 20], [1, 4, 6, 15]], [[1, 6, 20], [1, 2, 4, 20], [12, 15], [2, 4, 6, 15]],
+        [[1, 12, 15], [2, 6, 20], [1, 2, 4, 6, 15]], [[1, 2, 6, 20], [2, 12, 15]],
+        [[1, 2, 12, 15], [4, 6, 20]], [[1, 4, 6, 20], [4, 12, 15]],
+        [[12, 20], [1, 4, 12, 15], [2, 4, 6, 20]], [[1, 12, 20], [1, 2, 4, 6, 20], [6, 12, 15], [2, 4, 12, 15]],
+        [[2, 12, 20], [1, 6, 12, 15], [1, 2, 4, 12, 15]], [[15, 20], [1, 2, 12, 20], [2, 6, 12, 15]],
+        [[1, 15, 20], [4, 12, 20], [1, 2, 6, 12, 15]], [[2, 15, 20], [1, 4, 12, 20], [4, 6, 12, 15]],
+        [[1, 2, 15, 20], [6, 12, 20], [2, 4, 12, 20], [1, 4, 6, 12, 15]],
+        [[4, 15, 20], [1, 6, 12, 20], [1, 2, 4, 12, 20], [2, 4, 6, 12, 15]],
+        [[1, 4, 15, 20], [2, 6, 12, 20], [1, 2, 4, 6, 12, 15]], [[6, 15, 20], [2, 4, 15, 20], [1, 2, 6, 12, 20]],
+        [[1, 6, 15, 20], [1, 2, 4, 15, 20], [4, 6, 12, 20]], [[2, 6, 15, 20], [1, 4, 6, 12, 20]],
+        [[1, 2, 6, 15, 20], [2, 4, 6, 12, 20]], [[4, 6, 15, 20], [1, 2, 4, 6, 12, 20]], [[1, 4, 6, 15, 20]],
+        [[12, 15, 20], [2, 4, 6, 15, 20]], [[1, 12, 15, 20], [1, 2, 4, 6, 15, 20]], [[2, 12, 15, 20]],
+        [[1, 2, 12, 15, 20]], [[4, 12, 15, 20]], [[1, 4, 12, 15, 20]], [[6, 12, 15, 20], [2, 4, 12, 15, 20]],
+        [[1, 6, 12, 15, 20], [1, 2, 4, 12, 15, 20]], [[2, 6, 12, 15, 20]], [[1, 2, 6, 12, 15, 20]],
+        [[4, 6, 12, 15, 20]], [[1, 4, 6, 12, 15, 20]], [[2, 4, 6, 12, 15, 20]],
+    ],
+};
+const PALETTE = ["#ffff00", "#ff0000", "#0000ff", "#303030"];
+
+// grid "WxH", cells "w.x.y.a.b,..." (cell of area w at column x, row y, a wide, b tall)
+function parseFace(grid, cells) {
+    if (!grid && !cells) return { W: LEGACY.grid[0], H: LEGACY.grid[1], cells: LEGACY.cells.map(c => c.slice()) };
+    const g = /^(\d+)x(\d+)$/.exec(grid || "");
+    if (!g || !cells) throw new Error("need both grid=WxH and cells=w.x.y.a.b,...");
+    const W = +g[1], H = +g[2];
+    const cs = cells.split(",").map(s => {
+        const v = s.split(".").map(Number);
+        if (v.length !== 5 || v.some(x => !Number.isInteger(x) || x < 0)) throw new Error("bad cell " + s);
+        return v;
+    });
+    const seen = new Uint8Array(W * H);
+    for (const [w, x, y, a, b] of cs) {
+        if (a * b !== w) throw new Error(`cell ${w} is ${a}x${b}`);
+        if (x + a > W || y + b > H) throw new Error(`cell ${w} sticks out of the ${W}x${H} grid`);
+        for (let r = y; r < y + b; r++) for (let c = x; c < x + a; c++) {
+            if (seen[r * W + c]++) throw new Error(`cells overlap at column ${c}, row ${r}`);
+        }
+    }
+    if (seen.some(v => !v)) throw new Error("cells do not cover the whole grid");
+    return { W, H, cells: cs };
+}
+
+function isLegacy(face) {
+    return JSON.stringify(face.cells) === JSON.stringify(LEGACY.cells) && face.W === 6 && face.H === 10;
+}
+
+// ordering[s] lists the subsets (as cell indices) whose areas sum to s mod S
+function buildOrdering(face) {
+    const S = face.W * face.H, n = face.cells.length;
+    if (isLegacy(face)) {
+        const idx = {};
+        face.cells.forEach((c, i) => idx[c[0]] = i);
+        return LEGACY.ordering.map(opts => opts.map(sub => sub.map(w => idx[w])));
+    }
+    if (n > 20) throw new Error("at most 20 cells");
+    const ord = Array.from({ length: S }, () => []);
+    ord[0].push([...Array(n).keys()]);  // full face first, like index.html
+    for (let m = 0; m < (1 << n) - 1; m++) {
+        let s = 0;
+        const sub = [];
+        for (let i = 0; i < n; i++) if (m >> i & 1) { s += face.cells[i][0]; sub.push(i); }
+        ord[s].push(sub);
+    }
+    const gap = ord.findIndex(o => !o.length);
+    if (gap >= 0) throw new Error(`no subset of cells has area ${gap}: the weights are not complete`);
+    return ord;
+}
+
+// Mixed-radix digits of k pick one subset per state.  Most significant first:
+// non-power-of-2 counts, then powers of 2, each by count then state; for the
+// default face this is exactly index.html's base-3 / bit / bit-pair layout.
+function buildRadix(ordering) {
+    const pow2 = m => (m & (m - 1)) === 0;
+    const slots = [];
+    ordering.forEach((o, s) => { if (o.length > 1) slots.push([s, o.length]); });
+    slots.sort((p, q) => (pow2(p[1]) - pow2(q[1])) || (p[1] - q[1]) || (p[0] - q[0]));
+    const period = slots.reduce((acc, [, m]) => acc * BigInt(m), 1n);
+    return { slots, period };
+}
+
+function choices(radix, k, S) {
+    const out = new Array(S).fill(0);
+    for (let i = radix.slots.length - 1; i >= 0; i--) {
+        const [s, m] = radix.slots[i];
+        out[s] = Number(k % BigInt(m));
+        k /= BigInt(m);
+    }
+    return out;
+}
+
+const fdiv = (a, b) => { const q = a / b; return (a % b !== 0n && (a < 0n) !== (b < 0n)) ? q - 1n : q; };
+const fmod = (a, b) => ((a % b) + b) % b;
+
+// tick = tickNum/tickDen seconds per state, mod states per cycle; returns the shown subset
+function faceState(ctx, nowMs, tickNum, tickDen, mod) {
+    const { S, ordering, radix, originMs, offsetYears, P, N } = ctx;
+    const ms = BigInt(nowMs - originMs) + offsetYears * 365n * 24n * 3600n * 1000n;
+    const state = fdiv(ms * tickDen, tickNum * 1000n);
+    const cycle = fdiv(state, mod), ord = fmod(state, mod);
+    const k = fmod(cycle * P + N, radix.period);
+    // fewer states than S (minutes, hours): show the same share of the face when it divides evenly
+    const sum = Number(ord) * (S % Number(mod) === 0 ? S / Number(mod) : 1);
+    return ordering[sum][choices(radix, k, S)[sum]];
+}
+// --- end core ---
+</script>
+<script>
+    const param = new URLSearchParams(window.location.search);
+    const svg = document.getElementById("clock");
+    let ctx, modes, mode = 0, face, rects;
+    function fail(msg) {
+        const e = document.getElementById("error");
+        e.textContent = msg + "\n\nExample: ?grid=6x10&cells=20.0.0.4.5,12.4.0.2.6,15.0.5.3.5,1.3.5.1.1,2.3.6.1.2,4.4.6.2.2,6.3.8.3.2";
+        e.hidden = false;
+    }
+    try {
+        face = parseFace(param.get("grid"), param.get("cells"));
+        const S = face.W * face.H;
+        const ordering = buildOrdering(face);
+        const P = BigInt(param.get("P") || "1");
+        ctx = {
+            S, ordering, radix: buildRadix(ordering),
+            originMs: +new Date(param.get("origin") || "1970-01-01T00:00:00Z"),
+            offsetYears: BigInt(param.get("offset") || "0"),
+            P, N: BigInt(param.get("N") || "0") % P,
+        };
+        if (isNaN(ctx.originMs)) throw new Error("bad origin");
+        // cycle: seconds per full pass through S states (S = 420, cycle = 60 ticks every 1/7 s);
+        // period/mod as in index.html override it with whole seconds per state
+        const cycleSec = BigInt(param.get("cycle") || "60");
+        const first = param.has("period") || param.has("mod")
+            ? [BigInt(param.get("period") || "1"), 1n, BigInt(param.get("mod") || String(S))]
+            : [cycleSec, BigInt(S), BigInt(S)];
+        modes = [first, [60n, 1n, 60n], [3600n, 1n, 24n]];
+    } catch (e) {
+        fail(e.message);
+    }
+    function toggleMode() { if (modes) mode = (mode + 1) % modes.length; }
+
+    function draw() {
+        const { W, H, cells } = face;
+        // line width in grid units; 0.2 on 6x10 matches index.html, then scales with the grid
+        const line = +(param.get("line") || 0.02 * Math.max(W, H));
+        svg.setAttribute("viewBox", `${-line / 2} ${-line / 2} ${W + line} ${H + line}`);
+        svg.innerHTML = `<rect x="${-line / 2}" y="${-line / 2}" width="${W + line}" height="${H + line}" fill="#1e1e1e"/>`;
+        const custom = (param.get("colors") || "").split(",").filter(Boolean).map(c => "#" + c);
+        const byArea = cells.map((c, i) => i).sort((i, j) => cells[j][0] - cells[i][0]);
+        const colors = [];
+        byArea.forEach((i, r) => colors[i] = custom[i] || (isLegacy(face) ? LEGACY.colors[cells[i][0]] : PALETTE[r % PALETTE.length]));
+        if (+(param.get("mono") || 0) > 0) colors.fill("#eb0000");
+        rects = cells.map(([w, x, y, a, b], i) => {
+            const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            Object.entries({ x: x + line / 2, y: y + line / 2, width: a - line, height: b - line, fill: "#fff" })
+                .forEach(([k, v]) => r.setAttribute(k, v));
+            r.dataset.on = colors[i];
+            svg.appendChild(r);
+            return r;
+        });
+        const fit = () => {
+            const ar = (W + line) / (H + line);
+            const h = Math.min(window.innerHeight * 0.62, window.innerWidth * 0.9 / ar);
+            svg.style.height = h + "px";
+            svg.style.width = h * ar + "px";
+        };
+        fit();
+        window.addEventListener("resize", fit);
+        svg.hidden = false;
+    }
+    if (modes) {
+        draw();
+        let last = null;
+        setInterval(() => {
+            const [num, den, mod] = modes[mode];
+            const on = new Set(faceState(ctx, Date.now(), num, den, mod));
+            const key = [...on].join();
+            if (key === last) return;
+            last = key;
+            rects.forEach((r, i) => r.setAttribute("fill", on.has(i) ? r.dataset.on : "#fff"));
+        }, 25);
+    }
+</script>
+</body>
+</html>

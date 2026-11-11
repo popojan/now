@@ -199,8 +199,11 @@ def main():
         print(f"  {r['ws']}  period 2^{r['period']:.2f}  gpf {r['gpf']}  div {r['div']}/{len(r['ws'])}  balance {r['balance']:.2f}  {t}")
     shown = [r for r in rows[:args.show] if r["tile"]]
     for r in shown:
+        _, W, H, place = r["tile"]
         print(f"\n  {r['ws']}")
-        print(draw(r["tile"][3], r["tile"][1], r["tile"][2]))
+        print(draw(place, W, H))
+        cells = ",".join(".".join(map(str, c)) for c in sorted(place, key=lambda c: -c[0]))
+        print(f"    web/custom.html?grid={W}x{H}&cells={cells}")
     if args.svg:
         with open(args.svg, "w") as f:
             f.write(svg([(", ".join(map(str, r["ws"])) + f"  (cost {r['tile'][0]:.2f})", r["factors"], r["tile"][3], r["tile"][1], r["tile"][2])
