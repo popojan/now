@@ -75,13 +75,15 @@ function parseFace(grid, cells) {
 
 // Port of farey/tile.c: exact tiling of W x H by one rectangle per weight, minimising
 // the sum of |log aspect|; nocut rejects tilings a straight line splits in two.
+// ratio makes R:1 (either way round) the ideal cell shape instead of a square.
 // Returns {cost, cells} with cells [w, x, y, a, b] by decreasing w, or null.
-function tile(weights, W, H, nocut, cap = Infinity) {
+function tile(weights, W, H, nocut, cap = Infinity, ratio = 1) {
+    const logr = Math.log(ratio);
     if (W > 30) throw new Error("grid too wide to tile");
     const ws = weights.slice().sort((a, b) => b - a), n = ws.length, full = (1 << W) - 1;
     const opts = ws.map(w => {
         const o = [];
-        for (let a = 1; a <= w; a++) if (w % a === 0 && a <= W && w / a <= H) o.push([a, w / a, Math.abs(Math.log(a / (w / a)))]);
+        for (let a = 1; a <= w; a++) if (w % a === 0 && a <= W && w / a <= H) o.push([a, w / a, Math.abs(Math.abs(Math.log(a / (w / a))) - logr)]);
         return o.sort((p, q) => p[2] - q[2]);  // stable: equal costs keep narrower first, as in tile.c
     });
     if (opts.some(o => !o.length)) return null;
@@ -134,11 +136,11 @@ function tile(weights, W, H, nocut, cap = Infinity) {
 // Face from weights alone: the cheapest tiling of any W x H = sum with H/W <= 2,
 // with the Mondrian rule unless no such tiling exists.  The default weights keep
 // index.html's own layout.
-function faceFromBits(bits) {
+function faceFromBits(bits, ratio = 1) {
     const ws = bits.split(",").map(Number);
     if (ws.some(w => !Number.isInteger(w) || w < 1)) throw new Error("bad bits " + bits);
     const sorted = ws.slice().sort((a, b) => a - b).join();
-    if (sorted === LEGACY.cells.map(c => c[0]).sort((a, b) => a - b).join()) return parseFace(null, null);
+    if (ratio === 1 && sorted === LEGACY.cells.map(c => c[0]).sort((a, b) => a - b).join()) return parseFace(null, null);
     const S = ws.reduce((a, b) => a + b, 0);
     let reach = 0;
     for (const w of ws.slice().sort((a, b) => a - b)) {
@@ -149,7 +151,7 @@ function faceFromBits(bits) {
         let best = null;
         for (let W = Math.floor(Math.sqrt(S)); W >= 1; W--) {  // squarest first: an early bound prunes the rest
             if (S % W || S / W > 2 * W) continue;
-            const t = tile(ws, W, S / W, nocut, best ? best.cost : Infinity);
+            const t = tile(ws, W, S / W, nocut, best ? best.cost : Infinity, ratio);
             if (t) best = { ...t, W, H: S / W };
         }
         if (best) return { W: best.W, H: best.H, cells: best.cells, nocut };
@@ -271,7 +273,11 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod) {
         e.hidden = false;
     }
     try {
-        face = param.has("bits") ? faceFromBits(param.get("bits")) : parseFace(param.get("grid"), param.get("cells"));
+        // ratio=1.618 or 3:2, the ideal cell shape for bits= (default 1, square cells)
+        const rm = /^(\d+(?:\.\d+)?)(?::(\d+(?:\.\d+)?))?$/.exec(param.get("ratio") || "1");
+        if (!rm) throw new Error("bad ratio " + param.get("ratio"));
+        const ratio = Math.max(+rm[1] / +(rm[2] || 1), +(rm[2] || 1) / +rm[1]);
+        face = param.has("bits") ? faceFromBits(param.get("bits"), ratio) : parseFace(param.get("grid"), param.get("cells"));
         if (param.has("bits")) console.log(`grid=${face.W}x${face.H}&cells=${face.cells.map(c => c.join(".")).join(",")}`);
         const S = face.W * face.H;
         const ordering = buildOrdering(face);

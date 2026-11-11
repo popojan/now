@@ -105,5 +105,9 @@ for (const [bits, want] of [
     assert.strictEqual(`${fb.W}x${fb.H} ${fb.cells.map(c => c.join('.')).join(',')}`, want);
 }
 assert.deepStrictEqual(C.faceFromBits('20,15,12,6,4,2,1'), C.parseFace(null, null));
+// ratio: golden cells, as bits_search.py --no-cut --ratio 1.618
+const g = C.faceFromBits('1,2,4,8,15,28,55,112,195', 1.618);
+assert.strictEqual(`${g.W}x${g.H} ${g.cells.map(c => c.join('.')).join(',')}`,
+    '20x21 195.0.0.15.13,112.0.13.14.8,55.15.0.5.11,28.16.14.4.7,15.15.11.5.3,8.14.15.2.4,4.14.19.2.2,2.14.13.1.2,1.15.14.1.1');
 assert.throws(() => C.faceFromBits('1,2,5'), /not complete/);
 console.log(`bits= tiling matches tile.c (${Date.now() - t0} ms)`);

@@ -2,7 +2,8 @@
 // sum of |log aspect| (branch and bound).  usage: tile W H w1 w2 ...
 // prints the cost, then one "w x y a b" line per cell, or "none".
 // TILE_MAX_COST=c in the environment skips tilings costing c or more.
-// -n (before W) rejects tilings that a single straight line splits in two.
+// -n (before W) rejects tilings that a single straight line splits in two;
+// -r R makes R:1 (either way round) the ideal cell shape instead of a square.
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,7 @@ static int W, H, n, ws[MAXN], nopt[MAXN], oa[MAXN][MAXD], ob[MAXN][MAXD], used[M
 static double oc[MAXN][MAXD], lb[MAXN], best = INFINITY;
 static unsigned long long rows[512], full;
 static int place[MAXN][4], bestp[MAXN][4], nocut;
+static double logr;
 static int crossed(int along_x, int at) {  // does some placed cell straddle the line?
     for (int i = 0; i < n; i++) {
         if (!used[i]) continue;
@@ -56,8 +58,12 @@ static void rec(double cost, double rest) {
 }
 static int cmp(const void *p, const void *q) { return *(int *)q - *(int *)p; }
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "-n")) { nocut = 1; argv++; argc--; }
-    if (argc < 4) { fprintf(stderr, "usage: tile [-n] W H w1 w2 ...\n"); return 2; }
+    for (;;) {
+        if (argc > 1 && !strcmp(argv[1], "-n")) { nocut = 1; argv++; argc--; }
+        else if (argc > 2 && !strcmp(argv[1], "-r")) { logr = log(atof(argv[2])); argv += 2; argc -= 2; }
+        else break;
+    }
+    if (argc < 4) { fprintf(stderr, "usage: tile [-n] [-r R] W H w1 w2 ...\n"); return 2; }
     W = atoi(argv[1]); H = atoi(argv[2]); n = argc - 3;
     if (W > 63 || H > 511 || n > MAXN) return 2;
     for (int i = 0; i < n; i++) ws[i] = atoi(argv[3 + i]);
@@ -70,7 +76,7 @@ int main(int argc, char **argv) {
             if (ws[i] % a) continue;
             int b = ws[i] / a;
             if (a > W || b > H || nopt[i] == MAXD) continue;
-            double c = fabs(log((double)a / b));
+            double c = fabs(fabs(log((double)a / b)) - logr);
             // keep options cheapest-first so good tilings are found early
             int k = nopt[i]++;
             while (k > 0 && oc[i][k - 1] > c) { oa[i][k] = oa[i][k - 1]; ob[i][k] = ob[i][k - 1]; oc[i][k] = oc[i][k - 1]; k--; }
