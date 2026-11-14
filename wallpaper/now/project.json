@@ -123,6 +123,14 @@
 				"type" : "textinput",
 				"value" : "0"
 			},
+			"hours24" :
+			{
+				"index" : 15,
+				"order" : 115,
+				"text" : "24-hour panel (hour as a sum of weights)",
+				"type" : "bool",
+				"value" : false
+			},
 			"schemecolor" : 
 			{
 				"order" : 0,
