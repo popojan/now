@@ -135,7 +135,7 @@ for (;;) {
 const GW = 6 * u + 7 * g, GH = 10 * u + 11 * g;
 const GX = (W - GW) >> 1, GY = (H - GH) >> 1;
 
-const bg = render.makeColor(170, 170, 170);
+const bg = render.makeColor(0, 0, 0); // blends with the grid frame and the bezel
 const frame = render.makeColor(0, 0, 0);
 const white = render.makeColor(255, 255, 255);
 const yellow = render.makeColor(255, 255, 0);
