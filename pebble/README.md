@@ -27,6 +27,10 @@ pebble emu-tap --emulator emery     # switch mode
 pebble install --phone <ip>         # Developer Connection in the Pebble app
 ```
 
+On the phone, tick Settings → Use LAN developer connection, then open Devices, pick the
+watch and tap Dev Connection; only then does the app listen. Keep it in the foreground (iOS).
+On Android, `pebble install --adb` does this over USB.
+
 ## Notes
 
 - XS on Pebble ships without BigInt (`Error: dead strip`). The core works mod 2^30 and
