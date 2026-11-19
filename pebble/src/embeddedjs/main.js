@@ -204,20 +204,7 @@ function setMode(m) {
 setMode(0);
 const nextMode = () => setMode((mode + 1) % MODES.length);
 
-// Tap the screen (Time 2 / Round 2) or flick the wrist to cycle the modes.
-try {
-	let down = false;
-	new device.sensor.Touch({
-		onSample() {
-			const p = this.sample();
-			if (!p) return;
-			if (p.length && !down) nextMode();
-			down = p.length > 0;
-		}
-	});
-} catch (e) {
-	console.log("no touch: " + e.message);
-}
+// Flick the wrist to cycle the modes; PebbleOS doesn't deliver touch to watchfaces.
 new Accelerometer({ onTap: nextMode });
 
 // --- settings from the phone (config page in src/pkjs) ---

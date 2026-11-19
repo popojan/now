@@ -5,7 +5,8 @@ The Now clock as a Pebble watchface for **Pebble Time 2** (emery) and **Pebble R
 `wallpaper/now/now.html` and hraj.si/now, so `inverse/` can decode it.
 
 - `k = (minute * P + N) mod 2^30 * 3^16`, with minutes counted from `origin` (UTC) plus `offset` years
-- tap the screen or flick the wrist to cycle seconds → minutes in the hour → hours;
+- flick the wrist to cycle seconds → minutes in the hour → hours (PebbleOS gives watchfaces
+  no touch or buttons);
   the last two show local time (phone timezone, DST included), like the Wallpaper Engine version
 - the hour panel is a 12-hour dial: the lit area is the elapsed share of 12 hours, in 12-minute
   steps (10:00 lights 50/60); the `hours` setting 24 brings back hour 0–23 as a sum of weights
