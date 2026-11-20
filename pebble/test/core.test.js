@@ -5,8 +5,9 @@ const fs = require('fs');
 const path = require('path');
 const root = path.join(__dirname, '..', '..');
 const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'embeddedjs', 'main.js'), 'utf8');
-const core = src.split('// --- core (shared with the node test) ---')[1].split('// --- end core ---')[0];
-const C = new Function(core + '; return { minuteMasks, clockState, parseConfig, CELLS };')();
+const core = src.split('// --- core (shared with the node tests) ---')[1].split('// --- end core ---')[0];
+const C = new Function(core + '; return { LEGACY, clockState, cycleDigits, shownMask, option, parseConfig, str };')();
+const CELLS = C.LEGACY.cells.map(c => c[0]);
 
 const we = fs.readFileSync(path.join(root, 'wallpaper', 'now', 'now.html'), 'utf8');
 const ordering = eval('(' + we.match(/let ordering = (\{[\s\S]*?\});/)[1] + ')');
@@ -46,15 +47,18 @@ for (let i = 0; i < 2000; i++) {
 	const base = i % 2 ? Date.parse(starts[i % 3]) + rnd() * 7.2e6 : Date.parse(starts[2]) + (rnd() - 0.5) * 4e11;
 	for (let mode = 0; mode < 3; mode++) for (let d = 0; d < 3; d++) {
 		const now = Math.floor(base + d * 37000);
-		const st = C.clockState(now, cfg, mode, new Date(now));
-		const got = C.CELLS.filter((c, b) => C.minuteMasks(st.a, st.b)[st.second] & (1 << b));
+		const st = C.clockState(cfg.eng, now, cfg, mode, new Date(now));
+		const mask = C.shownMask(cfg.eng, st, C.cycleDigits(cfg.eng, st, cfg));
+		const got = CELLS.filter((c, b) => mask & (1 << b));
 		const exp = reference(now, cfg.origin, BigInt(s.offset), BigInt(s.P), BigInt(s.N), mode, s.hours === "24");
 		n++;
 		if (JSON.stringify(got) !== JSON.stringify(exp) && bad++ < 5) console.log("MISMATCH", s, now, mode, got, exp);
 	}
 	if (i < 300) {
-		const st = C.clockState(base, cfg);
-		dump.push([String(BigInt(st.a) * 1073741824n + BigInt(st.b)), C.minuteMasks(st.a, st.b)]);
+		const st = C.clockState(cfg.eng, base, cfg);
+		const d = C.cycleDigits(cfg.eng, st, cfg);
+		const k = ((BigInt(C.str(st.cycle)) * BigInt(s.P) + BigInt(s.N) % BigInt(s.P)) % CP + CP) % CP;
+		dump.push([String(k), Array.from({ length: 60 }, (_, sum) => C.option(cfg.eng, sum, d[sum]))]);
 	}
 }
 if (process.argv[2]) fs.writeFileSync(process.argv[2], JSON.stringify(dump));
