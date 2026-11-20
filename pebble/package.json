@@ -28,7 +28,9 @@
       "HOURS",
       "MONO",
       "FACE",
-      "MOD"
+      "MOD",
+      "LIT",
+      "UNLIT"
     ],
     "resources": {
       "media": []

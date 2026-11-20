@@ -80,6 +80,8 @@ assert.throws(() => W.parseConfig({ ...ok, mod: "7" }), /divide/);
 assert.throws(() => W.parseConfig({ ...ok, face: "2x2;2.0.0.2.1,2.0.1.2.1;00" }), /complete/);
 assert.throws(() => W.parseConfig({ ...ok, face: "2x2;2.0.0.2.1,1.0.1.1.1;00" }), /gap/);
 assert.strictEqual(W.parseConfig({ ...ok, mod: "30" }).mod, 30);
+assert.deepStrictEqual(W.parseConfig({ ...ok, lit: "FFffFF", unlit: "555555" }).unlit, [85, 85, 85]);
+assert.throws(() => W.parseConfig({ ...ok, lit: "red" }), /rrggbb/);
 console.log('settings validation ok');
 
 // the phone's copy of the tiling (src/pkjs/face.js) gives the faces used above

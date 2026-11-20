@@ -228,7 +228,7 @@ function parseFace(text) {
 	return { W, H, cells, colors: colors.split("").map(Number) };
 }
 
-const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12", mono: "0", face: "", mod: "" };
+const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12", mono: "0", lit: "ff0000", unlit: "ffffff", face: "", mod: "" };
 const P_MAX = 900719925474099; // keeps strMod(N, P) exact
 
 // String settings -> config with the face engine; throws on invalid input.
@@ -243,16 +243,21 @@ function parseConfig(s) {
 	const eng = engine(parseFace(s.face || ""));
 	const mod = s.mod ? Number(s.mod) : 0;
 	if (s.mod && !(/^\d+$/.test(s.mod) && mod >= 1 && eng.S % mod === 0)) throw new Error("mod must divide " + eng.S);
+	const rgb = hex => {
+		if (!/^[0-9a-fA-F]{6}$/.test(hex)) throw new Error("colours are rrggbb");
+		return [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
+	};
 	return {
 		origin, P: big(P), N: big(strMod(s.N, P)), offset: bigStr(s.offset), // hraj.si: N >= P -> N % P
-		hours24: s.hours === "24", mono: s.mono === "1", // web mono=1: every lit cell red
+		hours24: s.hours === "24", mono: s.mono === "1", // mono: every cell lit / unlit in one colour
+		lit: rgb(s.lit || DEFAULTS.lit), unlit: rgb(s.unlit || DEFAULTS.unlit),
 		mod, eng
 	};
 }
 // --- end core ---
 
-const KEYS = ["ORIGIN", "P", "N", "OFFSET", "HOURS", "MONO", "FACE", "MOD"];
-const NAMES = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset", HOURS: "hours", MONO: "mono", FACE: "face", MOD: "mod" };
+const KEYS = ["ORIGIN", "P", "N", "OFFSET", "HOURS", "MONO", "FACE", "MOD", "LIT", "UNLIT"];
+const NAMES = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset", HOURS: "hours", MONO: "mono", LIT: "lit", UNLIT: "unlit", FACE: "face", MOD: "mod" };
 
 function loadSettings() {
 	try {
@@ -275,7 +280,7 @@ const frame = render.makeColor(0, 0, 0);
 const white = render.makeColor(255, 255, 255);
 // custom.html's PALETTE: yellow, red, blue, dark (#303030 there, kept apart from the frame here)
 const PALETTE = [render.makeColor(255, 255, 0), render.makeColor(255, 0, 0), render.makeColor(0, 0, 255), render.makeColor(85, 85, 85)];
-const monoRed = render.makeColor(235, 0, 0); // web mono=1
+const monoColors = () => [render.makeColor(...cfg.lit), render.makeColor(...cfg.unlit)];
 
 // Square units, gap g between cells and around the frame, centred with black margins.
 function layout(face) {
@@ -294,7 +299,7 @@ function layout(face) {
 	}));
 	return { GX, GY, GW, GH, rects };
 }
-let geo = layout(cfg.eng.face);
+let geo = layout(cfg.eng.face), [monoLit, monoUnlit] = monoColors();
 
 let digits = null, digitsK = "", lastMask = -1, full = true, mode = 0;
 
@@ -317,7 +322,8 @@ function draw(date) {
 	render.fillRectangle(frame, GX, GY, GW, GH);
 	for (let i = 0; i < rects.length; i++) {
 		const r = rects[i];
-		render.fillRectangle(mask & (1 << i) ? (cfg.mono ? monoRed : r.color) : white, r.x, r.y, r.w, r.h);
+		const on = mask & (1 << i);
+		render.fillRectangle(cfg.mono ? (on ? monoLit : monoUnlit) : on ? r.color : white, r.x, r.y, r.w, r.h);
 	}
 	render.end();
 	lastMask = mask;
@@ -359,6 +365,7 @@ new Message({
 		try {
 			cfg = parseConfig(s);
 			geo = layout(cfg.eng.face);
+			[monoLit, monoUnlit] = monoColors();
 			localStorage.setItem("now", JSON.stringify(s));
 			digitsK = "";
 			full = true;

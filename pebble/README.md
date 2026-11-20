@@ -19,8 +19,10 @@ faces follow `web/custom.html` (`bits=`, `mod=`).
   the last two show local time (phone timezone, DST included), like the Wallpaper Engine version
 - the hour panel is a 12-hour dial: the lit area is the elapsed share of 12 hours, in steps of
   12 h / S (10:00 lights 50/60); the `hours` setting 24 brings back hour 0–23 as a sum of weights
-- the `mono` setting lights every cell red, like `mono=1` on the web
-- `face`, `mod`, `origin`, `offset`, `P`, `N`, `hours` and `mono` are set from the phone, see [Settings](#settings)
+- the `mono` setting draws every cell in one of two colours, lit and unlit, picked from the
+  64 the watch shows (previewed as the panel renders them); red on white like `mono=1` on the
+  web by default, or e.g. white on Mondrian black
+- `face`, `mod`, `origin`, `offset`, `P`, `N`, `hours`, `mono`, `lit` and `unlit` are set from the phone, see [Settings](#settings)
 
 ## Settings
 
@@ -28,7 +30,7 @@ Open the watchface's settings in the Pebble phone app. The form (`src/pkjs/index
 cell weights (a preset or your own, at most 12 cells summing to at most 420) and `mod`, and lists
 the divisors of S and the primes P should avoid. It sends the tiled face, `mod`, `origin`
 (ISO 8601), `offset` (years), `P` and `N` (as on hraj.si/now: N ≥ P is taken mod P), the hour
-panel (`12` or `24`) and the colours (Mondrian or mono red) to the watch, which keeps them
+panel (`12` or `24`) and the colours (Mondrian, or mono with its lit and unlit colour) to the watch, which keeps them
 across restarts. In the emulator, `pebble emu-app-config
 --emulator emery` opens the same form in the browser.
 
@@ -55,6 +57,8 @@ On Android, `pebble install --adb` does this over USB.
 - The default XS heaps are too small (`memory full`); `src/c/mdbl.c` passes a
   `ModdableCreationRecord`. Its stack, slot and chunk must all be non-zero
   ([pebbleos#1621](https://github.com/coredevices/pebbleos/issues/1621)).
+- Colours look paler than their values on the reflective panel: pure yellow comes out cream.
+  That's the panel; `pebble screenshot` reproduces it with a measured colour table.
 - After a crash the emulator can keep showing "Alloy: Fatal Error"; `pebble kill` and reinstall.
 
 ## Tests
