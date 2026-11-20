@@ -21,5 +21,6 @@ python3 bits_search.py 7 9 --distinct --tile 6 --sort tile --show 6 --no-cut --s
 - `grid=WxH` and `cells=w.x.y.a.b,...`, an explicit layout instead. With neither, the page shows the default face, and its subsets match `index.html` second by second.
 - `speed=1`, states per second. With 420 states the default cycle lasts 7 minutes. `speed=7` runs one cycle per minute, so a state lasts 1/7 s and the lit area is the elapsed share of the minute.
 - `colors=hex,...` and `line=`, the colours and the line width in grid units.
+- Click cycles seconds, minutes and hours. The hour panel is a 12-hour dial: the lit area is the elapsed share of 12 h, in steps of 12 h / S (8 minutes for S = 90). `hours=24` shows the hour 0–23 as a sum instead. The minute and hour panels follow local time, `tz=utc` shows UTC.
 
 `node web/custom.test.js` checks it against `index.html`.

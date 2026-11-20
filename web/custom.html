@@ -279,12 +279,13 @@ function choices(radix, k, S) {
 const fdiv = (a, b) => { const q = a / b; return (a % b !== 0n && (a < 0n) !== (b < 0n)) ? q - 1n : q; };
 const fmod = (a, b) => ((a % b) + b) % b;
 
-// tick = tickNum/tickDen seconds per state, mod states per cycle; returns the shown subset
-function faceState(ctx, nowMs, tickNum, tickDen, mod) {
+// tick = tickNum/tickDen seconds per state, mod states per cycle; returns the shown subset.
+// wall, if given, replaces the state within the cycle (local wall time); k stays absolute.
+function faceState(ctx, nowMs, tickNum, tickDen, mod, wall = null) {
     const { S, ordering, radix, originMs, offsetYears, P, N } = ctx;
     const ms = BigInt(nowMs - originMs) + offsetYears * 365n * 24n * 3600n * 1000n;
     const state = fdiv(ms * tickDen, tickNum * 1000n);
-    const cycle = fdiv(state, mod), ord = fmod(state, mod);
+    const cycle = fdiv(state, mod), ord = wall === null ? fmod(state, mod) : BigInt(wall);
     const k = fmod(cycle * P + N, radix.period);
     // fewer states than S (minutes, hours): show the same share of the face when it divides evenly
     const sum = Number(ord) * (S % Number(mod) === 0 ? S / Number(mod) : 1);
@@ -295,7 +296,16 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod) {
 <script>
     const param = new URLSearchParams(window.location.search);
     const svg = document.getElementById("clock");
-    let ctx, modes, mode = 0, face, rects, shape = null;
+    let ctx, modes, mode = 0, face, rects, shape = null, hours24 = false;
+    // the minute and hour panels show local wall time, like index.html; tz=utc shows UTC
+    const tzUtc = param.get("tz") === "utc";
+    function wallState() {
+        if (tzUtc || mode === 0) return null;
+        const d = new Date();
+        if (mode === 1) return d.getMinutes();
+        if (hours24) return d.getHours();
+        return Math.floor(((d.getHours() % 12) * 3600 + d.getMinutes() * 60 + d.getSeconds()) * ctx.S / 43200);
+    }
     function fail(msg) {
         const e = document.getElementById("error");
         e.textContent = msg + "\n\nExamples: ?bits=1,2,4,8,15,30,56,108,196&speed=7\n" +
@@ -332,7 +342,10 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod) {
             // period/mod as in index.html: seconds per state and states per cycle
             const speed = BigInt(param.get("speed") || "1");
             const first = [BigInt(param.get("period") || "1"), speed, BigInt(param.get("mod") || String(S))];
-            modes = [first, [60n, 1n, 60n], [3600n, 1n, 24n]];
+            // hours=12 (default): lit area = elapsed share of 12 h, in steps of 12 h / S;
+            // hours=24: hour 0-23 as a sum of weights
+            hours24 = param.get("hours") === "24";
+            modes = [first, [60n, 1n, 60n], hours24 ? [3600n, 1n, 24n] : [43200n, BigInt(S), BigInt(S)]];
             if (first[0] < 1n || speed < 1n || first[2] < 1n || first[2] > BigInt(S)) throw new Error(`need period, speed >= 1 and 1 <= mod <= ${S}`);
         } catch (e) {
             fail(e.message);
@@ -373,7 +386,7 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod) {
             let last = null;
             setInterval(() => {
                 const [num, den, mod] = modes[mode];
-                const on = new Set(faceState(ctx, Date.now(), num, den, mod));
+                const on = new Set(faceState(ctx, Date.now(), num, den, mod, wallState()));
                 const key = [...on].join();
                 if (key === last) return;
                 last = key;

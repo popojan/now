@@ -35,7 +35,7 @@ function context(face, origin, offset, P, N) {
 
 const face = C.parseFace(null, null);
 assert.strictEqual(C.buildRadix(C.buildOrdering(face)).period, CP);
-const modes = [[1n, 1n, 60n, 1n, 60n], [60n, 1n, 60n, 60n, 60n], [3600n, 1n, 24n, 3600n, 24n]];
+const modes = [[1n, 1n, 60n, 1n, 60n], [60n, 1n, 60n, 60n, 60n], [3600n, 1n, 24n, 3600n, 24n], [43200n, 60n, 60n, 720n, 60n]];
 let n = 0;
 for (let i = 0; i < 4000; i++) {
     const origin = Date.UTC(1970, 0, 1) + Math.floor(rnd() * 2e12);
@@ -131,3 +131,17 @@ for (const [shape, want] of [[16 / 9, '28x15'], [9 / 16, '15x28'], [1, '20x21'],
     console.log(`  shape ${shape.toFixed(2)}: ${fs.W}x${fs.H} in ${Date.now() - t1} ms`);
 }
 console.log('shape= ok');
+
+// 12-hour dial on a 90-state face: lit area = elapsed share of 12 h (8-minute steps)
+{
+    const f90 = C.faceFromBits('1,2,4,6,12,15,20,30');
+    const c90 = context(f90, 0, 0n, 1n, 0n);
+    const area = sub => sub.reduce((a, i) => a + f90.cells[i][0], 0) % 90;
+    for (let i = 0; i < 2000; i++) {
+        const now = Math.floor(rnd() * 3e12);
+        assert.strictEqual(area(C.faceState(c90, now, 43200n, 90n, 90n)), Math.floor((now / 1000 % 43200) * 90 / 43200));
+        const wall = Math.floor(rnd() * 90);
+        assert.strictEqual(area(C.faceState(c90, now, 43200n, 90n, 90n, wall)), wall);
+    }
+    console.log('12-hour dial ok');
+}
