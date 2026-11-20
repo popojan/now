@@ -185,6 +185,7 @@ def main():
     ap.add_argument("--smooth", type=int, default=0, help="largest allowed prime factor of any weight")
     ap.add_argument("--tile", type=int, default=0, help="find the N sets with the cheapest tiling (exact)")
     ap.add_argument("--max-grid-ratio", type=float, default=2.0)
+    ap.add_argument("--sum", type=int, default=0, help="total S instead of lcm(1..k), e.g. 120 for a 2-minute cycle")
     ap.add_argument("--ratio", type=float, default=1.0, help="ideal cell shape R:1 instead of a square (1.618 = golden)")
     ap.add_argument("--no-cut", action="store_true", help="Mondrian rule: no straight line may split the tiling in two")
     ap.add_argument("--sort", default="period", choices=["period", "balance", "tile", "gpf", "div"])
@@ -194,7 +195,7 @@ def main():
     args = ap.parse_args()
     global RATIO
     RATIO = args.ratio
-    S = lcm(*range(1, args.k + 1))
+    S = args.sum or lcm(*range(1, args.k + 1))
     sets = complete_sets(S, args.n)
     print(f"S={S}, n={args.n}: {len(sets)} complete multisets", end="")
     if args.distinct:

@@ -12,6 +12,7 @@ python3 bits_search.py 6 7 --distinct --divisors --tile 3 --sort tile --show 1  
 python3 bits_search.py 7 9 --distinct --tile 10 --sort tile --show 3 --svg f7.svg   # also draw them
 python3 bits_search.py 7 9 --distinct --smooth 5 --tile 5 --sort tile --show 1
 python3 bits_search.py 7 9 --distinct --tile 6 --sort tile --show 6 --no-cut --svg f7-mondrian.svg   # no straight cut through the whole face
+python3 bits_search.py 5 9 --sum 120 --distinct --tile 5 --sort tile --no-cut --max-grid-ratio 1.25 --show 2   # S=120 (2-minute cycle) on 10x12
 ```
 
 `--show` also prints a link to `web/custom.html`, a live clock for that face. It takes the URL parameters of `index.html` (`origin`, `offset`, `P`, `N`, `period`, `mod`, `mono`), plus:
