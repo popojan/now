@@ -304,15 +304,16 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod, wall = null) {
 <script>
     const param = new URLSearchParams(window.location.search);
     const svg = document.getElementById("clock");
-    let ctx, modes, mode = 0, face, rects, shape = null, hours24 = false;
+    let ctx, modes, mode = 0, face, rects, shape = null, hours = "12";
     // the minute and hour panels show local wall time, like index.html; tz=utc shows UTC
     const tzUtc = param.get("tz") === "utc";
     function wallState() {
         if (tzUtc || mode === 0) return null;
         const d = new Date();
         if (mode === 1) return d.getMinutes();
-        if (hours24) return d.getHours();
-        return Math.floor(((d.getHours() % 12) * 3600 + d.getMinutes() * 60 + d.getSeconds()) * ctx.S / 43200);
+        if (hours === "24") return d.getHours();
+        const h = hours === "day" ? d.getHours() : d.getHours() % 12;
+        return Math.floor((h * 3600 + d.getMinutes() * 60 + d.getSeconds()) * ctx.S / (hours === "day" ? 86400 : 43200));
     }
     function fail(msg) {
         const e = document.getElementById("error");
@@ -354,9 +355,10 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod, wall = null) {
             const mod0 = BigInt(S) % perMinute === 0n ? perMinute : BigInt(S);
             const first = [BigInt(param.get("period") || "1"), speed, param.has("mod") ? BigInt(param.get("mod")) : mod0];
             // hours=12 (default): lit area = elapsed share of 12 h, in steps of 12 h / S;
-            // hours=24: hour 0-23 as a sum of weights
-            hours24 = param.get("hours") === "24";
-            modes = [first, [60n, 1n, 60n], hours24 ? [3600n, 1n, 24n] : [43200n, BigInt(S), BigInt(S)]];
+            // hours=day: share of the day, in steps of 24 h / S; hours=24: hour 0-23 as a sum
+            hours = ["day", "24"].includes(param.get("hours")) ? param.get("hours") : "12";
+            const span = hours === "day" ? 86400n : 43200n;
+            modes = [first, [60n, 1n, 60n], hours === "24" ? [3600n, 1n, 24n] : [span, BigInt(S), BigInt(S)]];
             if (first[0] < 1n || speed < 1n || first[2] < 1n || first[2] > BigInt(S)) throw new Error(`need period, speed >= 1 and 1 <= mod <= ${S}`);
         } catch (e) {
             fail(e.message);

@@ -127,21 +127,22 @@
     let period = 60n;
     let sigP = 1n;  // Signature period (must be coprime with 60)
     let sigN = 0n;  // Signature value (0 to P-1)
-    // Hour panel: a 12-hour dial, lit area = elapsed share of 12 h in 12-minute steps;
-    // hours24 restores the original hour 0-23 as a sum of weights
-    let hours24 = new URLSearchParams(window.location.search).get('hours') === '24';
-    function setHours24(on) {
-        hours24 = on;
-        if (tick > 60n) { tick = hours24 ? 3600n : 720n; period = hours24 ? 24n : 60n; }
+    // Hour panel: 12 = 12-hour dial, lit area = elapsed share of 12 h in 12-minute steps;
+    // day = 24-hour dial, share of the day in 24-minute steps; 24 = the original hour 0-23 as a sum
+    const HOUR_MODES = { '12': [720n, 60n], day: [1440n, 60n], '24': [3600n, 24n] };
+    let hours = '12';
+    function setHours(h) {
+        hours = HOUR_MODES[h] ? h : '12';
+        if (tick > 60n) [tick, period] = HOUR_MODES[hours];
     }
+    setHours(new URLSearchParams(window.location.search).get('hours'));
 
     function togglePeriod() {
         if(tick <= 1n) {
             tick = 60n;
             period = 60n;
         } else if(tick <= 60n) {
-            tick = hours24 ? 3600n : 720n;
-            period = hours24 ? 24n : 60n;
+            [tick, period] = HOUR_MODES[hours];
         } else {
             tick = 1n;
             period = 60n;
@@ -243,11 +244,12 @@
             ord = (t / tick) % period;  // Seconds from UTC-based calculation
         } else if (tick === 60n) {
             ord = BigInt(new Date().getMinutes());  // Local minutes
-        } else if (hours24) {
+        } else if (hours === '24') {
             ord = BigInt(new Date().getHours());    // Local hours
         } else {
-            const d = new Date();                   // Local share of 12 h
-            ord = BigInt(Math.floor(((d.getHours() % 12) * 3600 + d.getMinutes() * 60 + d.getSeconds()) / 720));
+            const d = new Date();                   // Local share of 12 h or of the day
+            const h = hours === 'day' ? d.getHours() : d.getHours() % 12;
+            ord = BigInt(Math.floor((h * 3600 + d.getMinutes() * 60 + d.getSeconds()) / Number(tick)));
         }
 
         let s = ordering[ord][tt[ord]];
@@ -308,8 +310,8 @@
             if (properties.color1) {
                 originalColors[1] = rgb(properties.color1);
             }
-            if (properties.hours24) {
-                setHours24(properties.hours24.value);
+            if (properties.hours) {
+                setHours(properties.hours.value);
             }
             if (properties.origin) {
                 setOrigin(properties.origin.value);

@@ -35,7 +35,7 @@ function context(face, origin, offset, P, N) {
 
 const face = C.parseFace(null, null);
 assert.strictEqual(C.buildRadix(C.buildOrdering(face)).period, CP);
-const modes = [[1n, 1n, 60n, 1n, 60n], [60n, 1n, 60n, 60n, 60n], [3600n, 1n, 24n, 3600n, 24n], [43200n, 60n, 60n, 720n, 60n]];
+const modes = [[1n, 1n, 60n, 1n, 60n], [60n, 1n, 60n, 60n, 60n], [3600n, 1n, 24n, 3600n, 24n], [43200n, 60n, 60n, 720n, 60n], [86400n, 60n, 60n, 1440n, 60n]];
 let n = 0;
 for (let i = 0; i < 4000; i++) {
     const origin = Date.UTC(1970, 0, 1) + Math.floor(rnd() * 2e12);
@@ -179,4 +179,16 @@ console.log('shape= ok');
     }
     assert.strictEqual(repeats, 0);
     console.log('mod not dividing S ok');
+}
+
+// 24-hour dial: lit area = elapsed share of the day (16-minute steps on 90 states)
+{
+    const f90 = C.faceFromBits('1,2,4,6,12,15,20,30');
+    const c90 = context(f90, 0, 0n, 1n, 0n);
+    const area = sub => sub.reduce((a, i) => a + f90.cells[i][0], 0) % 90;
+    for (let i = 0; i < 2000; i++) {
+        const now = Math.floor(rnd() * 3e12);
+        assert.strictEqual(area(C.faceState(c90, now, 86400n, 90n, 90n)), Math.floor((now / 1000 % 86400) * 90 / 86400));
+    }
+    console.log('24-hour dial ok');
 }

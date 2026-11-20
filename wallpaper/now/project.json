@@ -123,13 +123,19 @@
 				"type" : "textinput",
 				"value" : "0"
 			},
-			"hours24" :
+			"hours" :
 			{
 				"index" : 15,
+				"options" :
+				[
+					{ "label" : "12-hour dial (share of 12 h)", "value" : "12" },
+					{ "label" : "24-hour dial (share of the day)", "value" : "day" },
+					{ "label" : "24 hours (hour as a sum of weights)", "value" : "24" }
+				],
 				"order" : 115,
-				"text" : "24-hour panel (hour as a sum of weights)",
-				"type" : "bool",
-				"value" : false
+				"text" : "Hour panel",
+				"type" : "combo",
+				"value" : "12"
 			},
 			"schemecolor" : 
 			{

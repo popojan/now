@@ -16,12 +16,14 @@ Just open `index.html` in any browser.
 - `offset` - Year offset from origin
 - `period` - Time unit in minutes (1=minutes, 60=hours, 3600=days)
 - `mod` - Modulus for display (default: 60)
+- `hours` - Hour panel: `12` (default) a 12-hour dial, lit area = elapsed share of 12 h; `day` a 24-hour dial, share of the day; `24` the hour 0–23 as a sum of weights
+- `tz=utc` - Minute and hour panels in UTC instead of local time
 
 Example: `https://hraj.si/now?origin=2000-01-01T00:00:00Z`
 
 ## Click Interaction
 
-Click the clock to cycle through display modes (all UTC):
+Click the clock to cycle through display modes:
 - **Seconds** (default): Pattern changes every second within minute
-- **Minutes**: Pattern changes every minute within hour
-- **Hours**: Pattern changes every hour within day
+- **Minutes**: Lit area = minute of the hour, local time
+- **Hours**: The hour panel (`hours`), local time
