@@ -15,16 +15,18 @@ const perm = new Function('ordering',
 	we.match(/function integerDigitsBasePad[\s\S]*?\n    }\n/)[0] +
 	we.match(/function perm\(t\)[\s\S]*?return ret;\n    }/)[0] + '; return perm;')(ordering);
 const CP = 46221064723759104n;
+const HOUR_MODES = eval('(' + we.match(/const HOUR_MODES = (\{[^}]*\});/)[1] + ')');
 
 // Wallpaper Engine's setInterval body plus the hraj.si offset term
-function reference(now, origin, offset, P, N, mode, hours24) {
-	const h24 = mode === 2 && hours24;
-	const tick = h24 ? 3600n : [1n, 60n, 720n][mode], period = h24 ? 24n : 60n;
+// hours: the hour panel as Wallpaper Engine names it (12, day, 24)
+function reference(now, origin, offset, P, N, mode, hours) {
+	const [tick, period] = mode < 2 ? [[1n, 60n], [60n, 60n]][mode] : HOUR_MODES[hours];
+	const h24 = mode === 2 && hours === "24";
 	let t = BigInt(Math.floor((now - origin) / 1000.0));
 	t = (t + period * tick * CP + offset * 365n * 24n * 3600n) % (60n * CP * period * tick);
 	const k = (t / (period * tick) * P + N % P) % CP, d = new Date(now);
 	const ord = mode === 0 ? (t / tick) % period : BigInt(mode === 1 ? d.getMinutes() : h24 ? d.getHours()
-		: Math.floor(((d.getHours() % 12) * 3600 + d.getMinutes() * 60 + d.getSeconds()) / 720));
+		: Math.floor(((hours === "day" ? d.getHours() : d.getHours() % 12) * 3600 + d.getMinutes() * 60 + d.getSeconds()) / Number(tick)));
 	return ordering[ord][perm(k)[ord]];
 }
 
@@ -41,16 +43,18 @@ for (let i = 0; i < 2000; i++) {
 		P: String([1n, 7n, 25n, 1000003n, big(12) * 6n + 1n][i % 5]),
 		N: String(big(14)),
 		offset: String([0n, 5n, -3n, 88000000000n, big(15)][(i >> 2) % 5]),
-		hours: (i >> 1) % 2 ? "24" : "12"
+		hours: ["auto", "12", "day", "24"][(i >> 1) % 4]
 	};
+	const hour12 = (i >> 3) % 2 === 0; // the watch's 12/24h setting, for hours=auto
+	const panel = s.hours === "auto" ? (hour12 ? "12" : "day") : s.hours;
 	const cfg = C.parseConfig(s);
 	const base = i % 2 ? Date.parse(starts[i % 3]) + rnd() * 7.2e6 : Date.parse(starts[2]) + (rnd() - 0.5) * 4e11;
 	for (let mode = 0; mode < 3; mode++) for (let d = 0; d < 3; d++) {
 		const now = Math.floor(base + d * 37000);
-		const st = C.clockState(cfg.eng, now, cfg, mode, new Date(now));
+		const st = C.clockState(cfg.eng, now, cfg, mode, new Date(now), hour12);
 		const mask = C.shownMask(cfg.eng, st, C.cycleDigits(cfg.eng, st, cfg));
 		const got = CELLS.filter((c, b) => mask & (1 << b));
-		const exp = reference(now, cfg.origin, BigInt(s.offset), BigInt(s.P), BigInt(s.N), mode, s.hours === "24");
+		const exp = reference(now, cfg.origin, BigInt(s.offset), BigInt(s.P), BigInt(s.N), mode, panel);
 		n++;
 		if (JSON.stringify(got) !== JSON.stringify(exp) && bad++ < 5) console.log("MISMATCH", s, now, mode, got, exp);
 	}

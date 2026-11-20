@@ -17,8 +17,10 @@ faces follow `web/custom.html` (`bits=`, `mod=`).
 - flick the wrist to cycle seconds → minutes in the hour → hours (PebbleOS gives watchfaces
   no touch or buttons);
   the last two show local time (phone timezone, DST included), like the Wallpaper Engine version
-- the hour panel is a 12-hour dial: the lit area is the elapsed share of 12 hours, in steps of
-  12 h / S (10:00 lights 50/60); the `hours` setting 24 brings back hour 0–23 as a sum of weights
+- the hour panel follows the watch's 12/24h setting: a 12-hour dial (lit area = elapsed share
+  of 12 hours, in steps of 12 h / S; 10:00 lights 50/60) or a 24-hour dial (share of the day,
+  18:00 lights 3/4). The `hours` setting can fix either (`12`, `day`), or `24` brings back
+  hour 0–23 as a sum of weights. A change of the watch's setting shows from the next minute
 - the `mono` setting draws every cell in one of two colours, lit and unlit, picked from the
   64 the watch shows (previewed as the panel renders them); red on white like `mono=1` on the
   web by default, or e.g. white on Mondrian black
@@ -30,7 +32,7 @@ Open the watchface's settings in the Pebble phone app. The form (`src/pkjs/index
 cell weights (a preset or your own, at most 12 cells summing to at most 420) and `mod`, and lists
 the divisors of S and the primes P should avoid. It sends the tiled face, `mod`, `origin`
 (ISO 8601), `offset` (years), `P` and `N` (as on hraj.si/now: N ≥ P is taken mod P), the hour
-panel (`12` or `24`) and the colours (Mondrian, or mono with its lit and unlit colour) to the watch, which keeps them
+panel (`auto`, `12`, `day` or `24`) and the colours (Mondrian, or mono with its lit and unlit colour) to the watch, which keeps them
 across restarts. In the emulator, `pebble emu-app-config
 --emulator emery` opens the same form in the browser.
 

@@ -2,7 +2,7 @@
 // (face.js, as web/custom.html); the watch only gets the finished layout.
 var faceText = require("./face").faceText;
 
-var DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12", mono: "0",
+var DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0",
 	lit: "ff0000", unlit: "ffffff", bits: "", mod: "" };
 // How the panel shows the 64 colours (index r*16 + g*4 + b, 2 bits each), from pebble-tool's
 // screenshot colour correction (MIT)
@@ -151,7 +151,9 @@ function page(s) {
 		'<label>N</label><input id="N" inputmode="numeric" value="' + esc(s.N) + '">' +
 		'<small>signature value, 0 &le; N &lt; P</small>' +
 		'<label>hour panel</label><select id="hours" ' + sel + '>' +
+		option("auto", "Follow the watch: 12h → 12-hour dial, 24h → 24-hour dial", s.hours) +
 		option("12", "12-hour dial: lit area = share of 12 h", s.hours) +
+		option("day", "24-hour dial: lit area = share of the day", s.hours) +
 		option("24", "24 hours: hour as a sum of weights", s.hours) + '</select>' +
 		'<label>colours</label><select id="mono" ' + sel + '>' +
 		option("0", "Mondrian: yellow, red, blue, grey", s.mono) +
@@ -183,7 +185,7 @@ function send(s) {
 		console.log("face not tiled: " + e.message);
 		return;
 	}
-	Pebble.sendAppMessage({ ORIGIN: s.origin, P: s.P, N: s.N, OFFSET: s.offset, HOURS: s.hours || "12",
+	Pebble.sendAppMessage({ ORIGIN: s.origin, P: s.P, N: s.N, OFFSET: s.offset, HOURS: s.hours || "auto",
 		MONO: s.mono || "0", LIT: s.lit || DEFAULTS.lit, UNLIT: s.unlit || DEFAULTS.unlit, FACE: face, MOD: s.mod || "" },
 		function () { console.log("settings sent: face " + (face || "default")); },
 		function (e) { console.log("settings send failed: " + JSON.stringify(e)); });

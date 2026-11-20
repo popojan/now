@@ -163,28 +163,32 @@ const engine = face => {
 const defaultMod = S => S % 60 === 0 ? 60 : S; // a full face is one minute when it can be
 
 // Display modes as on the web: [tick numerator, denominator (s), states per cycle]: seconds
-// (mod per cycle), minutes in the hour, and hours as a 12-hour dial (lit area = elapsed share
-// of 12 h) or, with the hours24 setting, the hour 0-23 as a sum of weights.
-function modeParams(S, cfg, mode) {
+// (mod per cycle), minutes in the hour, and the hour panel: "12" a 12-hour dial (lit area =
+// elapsed share of 12 h), "day" a 24-hour dial, "24" the hour 0-23 as a sum of weights.
+// "auto" follows the watch's 12/24h setting.
+const hourPanel = (cfg, hour12) => cfg.hours === "auto" ? (hour12 ? "12" : "day") : cfg.hours;
+function modeParams(S, cfg, mode, hour12) {
 	if (mode === 0) return [1, 1, cfg.mod || defaultMod(S)];
 	if (mode === 1) return [60, 1, 60];
-	return cfg.hours24 ? [3600, 1, 24] : [43200, S, S];
+	const h = hourPanel(cfg, hour12);
+	return h === "24" ? [3600, 1, 24] : [h === "day" ? 86400 : 43200, S, S];
 }
 
 // Mirrors custom.html's faceState: cycles counted from origin (UTC) plus offset years. Like
 // Wallpaper Engine, the minute and hour modes show local time (phone timezone incl. DST).
-function clockState(eng, nowMs, cfg, mode = 0, local = null) {
+function clockState(eng, nowMs, cfg, mode = 0, local = null, hour12 = true) {
 	const { S, ordering } = eng;
-	const [num, den, mod] = modeParams(S, cfg, mode);
+	const [num, den, mod] = modeParams(S, cfg, mode, hour12);
 	const step = S % mod === 0 ? S / mod : 1;
 	// the default face keeps all 60 digits when it shows 0..mod-1 (its hours=24 panel)
 	const key = mod === S || (ordering.legacy && step === 1) ? S : mod;
 	const slots = eng.radix[key] ??= buildRadix(ordering, step, mod);
 	const ms = divmod(mul(big(nowMs - cfg.origin), big(den)), num * 1000).q;
 	const { q: cycle, r } = divmod(add(ms, mul(cfg.offset, big(31536000 * den / num))), mod);
-	const ord = mode === 0 || !local ? r : mode === 1 ? local.getMinutes() : cfg.hours24 ? local.getHours()
-		: Math.floor(((local.getHours() % 12) * 3600 + local.getMinutes() * 60 + local.getSeconds()) * S / 43200);
-	return { slots, cycle, sum: ord * step, key: mode + ":" + str(cycle) };
+	const ord = mode === 0 || !local ? r : mode === 1 ? local.getMinutes() : num === 3600 ? local.getHours()
+		: Math.floor(((num === 86400 ? local.getHours() : local.getHours() % 12) * 3600 +
+			local.getMinutes() * 60 + local.getSeconds()) * S / num);
+	return { slots, cycle, sum: ord * step, key: mode + ":" + num + ":" + str(cycle) };
 }
 // digit per sum for this cycle: floor divmod of cycle * P + N gives the digits of k mod period
 function cycleDigits(eng, st, cfg) {
@@ -228,7 +232,7 @@ function parseFace(text) {
 	return { W, H, cells, colors: colors.split("").map(Number) };
 }
 
-const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12", mono: "0", lit: "ff0000", unlit: "ffffff", face: "", mod: "" };
+const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0", lit: "ff0000", unlit: "ffffff", face: "", mod: "" };
 const P_MAX = 900719925474099; // keeps strMod(N, P) exact
 
 // String settings -> config with the face engine; throws on invalid input.
@@ -237,7 +241,7 @@ function parseConfig(s) {
 	if (isNaN(origin)) throw new Error("bad origin");
 	if (!/^\d+$/.test(s.P) || !/^\d+$/.test(s.N) || !/^[+-]?\d+$/.test(s.offset))
 		throw new Error("P, N, offset must be integers (P, N >= 0)");
-	if (s.hours !== "12" && s.hours !== "24") throw new Error("hours must be 12 or 24");
+	if (!["auto", "12", "day", "24"].includes(s.hours)) throw new Error("hours must be auto, 12, day or 24");
 	const P = Number(s.P);
 	if (P < 1 || P > P_MAX) throw new Error("P must be 1.." + P_MAX);
 	const eng = engine(parseFace(s.face || ""));
@@ -249,7 +253,7 @@ function parseConfig(s) {
 	};
 	return {
 		origin, P: big(P), N: big(strMod(s.N, P)), offset: bigStr(s.offset), // hraj.si: N >= P -> N % P
-		hours24: s.hours === "24", mono: s.mono === "1", // mono: every cell lit / unlit in one colour
+		hours: s.hours, mono: s.mono === "1", // mono: every cell lit / unlit in one colour
 		lit: rgb(s.lit || DEFAULTS.lit), unlit: rgb(s.unlit || DEFAULTS.unlit),
 		mod, eng
 	};
@@ -304,7 +308,7 @@ let geo = layout(cfg.eng.face), [monoLit, monoUnlit] = monoColors();
 let digits = null, digitsK = "", lastMask = -1, full = true, mode = 0;
 
 function draw(date) {
-	const st = clockState(cfg.eng, date.getTime(), cfg, mode, date);
+	const st = clockState(cfg.eng, date.getTime(), cfg, mode, date, watch.hour12);
 	if (st.key !== digitsK) {
 		digits = cycleDigits(cfg.eng, st, cfg);
 		digitsK = st.key;

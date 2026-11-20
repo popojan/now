@@ -49,21 +49,22 @@ for (const [bits, shape] of faces) {
 		const s = {
 			origin: origins[i % 3], P: String([1, 7, 49, 1000003, 11 * 13 * 17][i % 5]), N: digits(12),
 			offset: [ "0", "5", "-3", "88000000000", digits(20)][(i >> 1) % 5],
-			hours: i % 2 ? "24" : "12", mono: "0", face: text, mod: i % 4 ? String(divisors[i % divisors.length]) : ""
+			hours: ["auto", "12", "day", "24"][i % 4], mono: "0", face: text, mod: i % 4 ? String(divisors[i % divisors.length]) : ""
 		};
 		const cfg = W.parseConfig(s);
 		const P = BigInt(s.P);
 		const ctx = { S, ordering, radix, originMs: Date.parse(s.origin), offsetYears: BigInt(s.offset), P, N: BigInt(s.N) % P };
 		const mod = BigInt(s.mod || (S % 60 === 0 ? 60 : S));
-		const modes = [[1n, 1n, mod], [60n, 1n, 60n], s.hours === "24" ? [3600n, 1n, 24n] : [43200n, BigInt(S), BigInt(S)]];
+		const hour12 = (i >> 2) % 2 === 0, panel = s.hours === "auto" ? (hour12 ? "12" : "day") : s.hours;
+		const modes = [[1n, 1n, mod], [60n, 1n, 60n], panel === "24" ? [3600n, 1n, 24n] : [panel === "day" ? 86400n : 43200n, BigInt(S), BigInt(S)]];
 		const base = Date.parse("2026-11-20T12:00:00Z") + (rnd() - 0.5) * 4e11;
 		for (let mode = 0; mode < 3; mode++) for (let d = 0; d < 3; d++) {
 			const now = Math.floor(base + d * 37000);
 			const local = new Date(now);
-			const st = W.clockState(cfg.eng, now, cfg, mode, local);
+			const st = W.clockState(cfg.eng, now, cfg, mode, local, hour12);
 			const mask = W.shownMask(cfg.eng, st, W.cycleDigits(cfg.eng, st, cfg));
-			const wall = mode === 0 ? null : mode === 1 ? local.getMinutes() : s.hours === "24" ? local.getHours()
-				: Math.floor(((local.getHours() % 12) * 3600 + local.getMinutes() * 60 + local.getSeconds()) * S / 43200);
+			const wall = mode === 0 ? null : mode === 1 ? local.getMinutes() : panel === "24" ? local.getHours()
+				: Math.floor(((panel === "day" ? local.getHours() : local.getHours() % 12) * 3600 + local.getMinutes() * 60 + local.getSeconds()) * S / (panel === "day" ? 86400 : 43200));
 			const want = C.faceState(ctx, now, ...modes[mode], wall).slice().sort((a, b) => a - b);
 			const got = face.cells.map((c, j) => j).filter(j => mask & (1 << j));
 			assert.deepStrictEqual(got, want, `${bits} ${JSON.stringify(s)} now=${now} mode=${mode}`);
@@ -75,8 +76,9 @@ for (const [bits, shape] of faces) {
 console.log(`core vs web/custom.html (TZ=${process.env.TZ || "system"}): ${n} checks, 0 mismatches`);
 
 // settings that must be refused
-const ok = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12", mono: "0", face: "", mod: "" };
+const ok = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0", face: "", mod: "" };
 assert.throws(() => W.parseConfig({ ...ok, mod: "7" }), /divide/);
+assert.throws(() => W.parseConfig({ ...ok, hours: "13" }), /hours/);
 assert.throws(() => W.parseConfig({ ...ok, face: "2x2;2.0.0.2.1,2.0.1.2.1;00" }), /complete/);
 assert.throws(() => W.parseConfig({ ...ok, face: "2x2;2.0.0.2.1,1.0.1.1.1;00" }), /gap/);
 assert.strictEqual(W.parseConfig({ ...ok, mod: "30" }).mod, 30);
