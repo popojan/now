@@ -20,7 +20,7 @@ python3 bits_search.py 5 9 --sum 120 --distinct --tile 5 --sort tile --no-cut --
 - `shape=16:9`, width:height of the whole face. The page uses the grid nearest that shape, landscape included, then stretches the units so the shape is exact. A uniform stretch keeps the areas proportional to the weights. With only `shape=`, the default face turns on its side when landscape is nearer, and it still matches `index.html`. Wide shapes can take a second or two to tile.
 - `ratio=1.618` or `ratio=3:2`, the ideal cell shape for `bits=`, either way round. The default is 1, square cells. The same option in the tools is `bits_search.py --ratio` and `tile -r`.
 - `grid=WxH` and `cells=w.x.y.a.b,...`, an explicit layout instead. With neither, the page shows the default face, and its subsets match `index.html` second by second.
-- `speed=1`, states per second. With 420 states the default cycle lasts 7 minutes. `speed=7` runs one cycle per minute, so a state lasts 1/7 s and the lit area is the elapsed share of the minute.
+- `speed=1`, states per second. A full face is one minute whenever S is a multiple of 60 × speed: with S = 120 second s lights 2s, with S = 420 every 7th sum is shown, and `speed=7` uses all 420 at 1/7 s each. Other S cycle through all states (S = 90: 90 s); `mod=` sets the states per cycle explicitly.
 - `colors=hex,...` and `line=`, the colours and the line width in grid units.
 - Click cycles seconds, minutes and hours. The hour panel is a 12-hour dial: the lit area is the elapsed share of 12 h, in steps of 12 h / S (8 minutes for S = 90). `hours=24` shows the hour 0–23 as a sum instead. The minute and hour panels follow local time, `tz=utc` shows UTC.
 

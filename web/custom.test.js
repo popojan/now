@@ -145,3 +145,24 @@ console.log('shape= ok');
     }
     console.log('12-hour dial ok');
 }
+
+// 120-state face, one minute per cycle: second s lights 2s, and digits only go to the even
+// sums shown, so no minute repeats the one before (1,2,4,6,12,16,30,49 has an odd fastest digit)
+{
+    const f = C.faceFromBits('1,2,4,6,12,16,30,49');
+    const c = context(f, 0, 0n, 1n, 0n);
+    const area = sub => sub.reduce((a, i) => a + f.cells[i][0], 0) % 120;
+    let prev = null;
+    for (let m = 0; m < 300; m++) {
+        const shown = [];
+        for (let s = 0; s < 60; s++) {
+            const sub = C.faceState(c, m * 60000 + s * 1000, 1n, 1n, 60n);
+            assert.strictEqual(area(sub), 2 * s);
+            shown.push(sub.join('.'));
+        }
+        const key = shown.join('|');
+        assert.notStrictEqual(key, prev, `minute ${m} repeats the one before`);
+        prev = key;
+    }
+    console.log('one-minute cycle on 120 states ok');
+}

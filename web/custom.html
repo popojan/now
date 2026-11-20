@@ -257,10 +257,12 @@ function buildOrdering(face) {
 // Mixed-radix digits of k pick one subset per state.  Most significant first:
 // non-power-of-2 counts, then powers of 2, each by count then state; for the
 // default face this is exactly index.html's base-3 / bit / bit-pair layout.
-function buildRadix(ordering) {
+// step > 1: only the sums shown (multiples of step) get digits, or a digit of an
+// unseen sum could be the only change between two cycles.
+function buildRadix(ordering, step = 1) {
     const pow2 = m => (m & (m - 1)) === 0;
     const slots = [];
-    ordering.forEach((o, s) => { if (o.length > 1) slots.push([s, o.length]); });
+    ordering.forEach((o, s) => { if (o.length > 1 && s % step === 0) slots.push([s, o.length]); });
     slots.sort((p, q) => (pow2(p[1]) - pow2(q[1])) || (p[1] - q[1]) || (p[0] - q[0]));
     const period = slots.reduce((acc, [, m]) => acc * BigInt(m), 1n);
     return { slots, period };
@@ -282,13 +284,15 @@ const fmod = (a, b) => ((a % b) + b) % b;
 // tick = tickNum/tickDen seconds per state, mod states per cycle; returns the shown subset.
 // wall, if given, replaces the state within the cycle (local wall time); k stays absolute.
 function faceState(ctx, nowMs, tickNum, tickDen, mod, wall = null) {
-    const { S, ordering, radix, originMs, offsetYears, P, N } = ctx;
+    const { S, ordering, originMs, offsetYears, P, N } = ctx;
     const ms = BigInt(nowMs - originMs) + offsetYears * 365n * 24n * 3600n * 1000n;
     const state = fdiv(ms * tickDen, tickNum * 1000n);
     const cycle = fdiv(state, mod), ord = wall === null ? fmod(state, mod) : BigInt(wall);
-    const k = fmod(cycle * P + N, radix.period);
     // fewer states than S (minutes, hours): show the same share of the face when it divides evenly
-    const sum = Number(ord) * (S % Number(mod) === 0 ? S / Number(mod) : 1);
+    const step = S % Number(mod) === 0 ? S / Number(mod) : 1;
+    const radix = step === 1 ? ctx.radix : ((ctx.radixes ??= {})[step] ??= buildRadix(ordering, step));
+    const k = fmod(cycle * P + N, radix.period);
+    const sum = Number(ord) * step;
     return ordering[sum][choices(radix, k, S)[sum]];
 }
 // --- end core ---
@@ -339,9 +343,12 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod, wall = null) {
             };
             if (isNaN(ctx.originMs)) throw new Error("bad origin");
             // speed: states per second (S = 420, speed = 7 runs one cycle per minute);
-            // period/mod as in index.html: seconds per state and states per cycle
+            // period/mod as in index.html: seconds per state and states per cycle.
+            // Default: a full face is one minute when S is a multiple of 60 * speed.
             const speed = BigInt(param.get("speed") || "1");
-            const first = [BigInt(param.get("period") || "1"), speed, BigInt(param.get("mod") || String(S))];
+            const perMinute = 60n * speed;
+            const mod0 = BigInt(S) % perMinute === 0n ? perMinute : BigInt(S);
+            const first = [BigInt(param.get("period") || "1"), speed, param.has("mod") ? BigInt(param.get("mod")) : mod0];
             // hours=12 (default): lit area = elapsed share of 12 h, in steps of 12 h / S;
             // hours=24: hour 0-23 as a sum of weights
             hours24 = param.get("hours") === "24";
