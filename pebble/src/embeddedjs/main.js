@@ -86,7 +86,7 @@ function clockState(nowMs, cfg, mode = 0, local = null) {
 	return { a: mulmod(mod(kA - kB, A), INV_B, A), b: kB, second: ord };
 }
 
-const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12" };
+const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12", mono: "0" };
 const P_MAX = 900719925474099; // keeps strMod(N, P) exact
 
 // String settings -> residues; throws on invalid input.
@@ -101,12 +101,13 @@ function parseConfig(s) {
 	const N = strMod(s.N, P); // hraj.si: N >= P -> N % P
 	return {
 		origin, PA: P % A, PB: P % B, NA: N % A, NB: N % B,
-		OA: strMod(s.offset, A), OB: strMod(s.offset, B), hours24: s.hours === "24"
+		OA: strMod(s.offset, A), OB: strMod(s.offset, B), hours24: s.hours === "24",
+		mono: s.mono === "1" // web mono=1: every lit cell red
 	};
 }
 // --- end core ---
 
-const KEYS = ["ORIGIN", "P", "N", "OFFSET", "HOURS"];
+const KEYS = ["ORIGIN", "P", "N", "OFFSET", "HOURS", "MONO"];
 
 function loadSettings() {
 	try {
@@ -142,6 +143,7 @@ const yellow = render.makeColor(255, 255, 0);
 const red = render.makeColor(255, 0, 0);
 const blue = render.makeColor(0, 0, 255);
 const dark = render.makeColor(85, 85, 85); // web uses #303030 on a #1E1E1E frame; keep them distinguishable
+const monoRed = render.makeColor(235, 0, 0); // web mono=1
 
 // [cell value, color, col, row, colSpan, rowSpan] in CELLS order
 const RECTS = [
@@ -179,7 +181,7 @@ function draw(date) {
 	render.fillRectangle(frame, GX, GY, GW, GH);
 	for (let i = 0; i < 7; i++) {
 		const r = RECTS[i];
-		render.fillRectangle(mask & (1 << i) ? r.color : white, r.x, r.y, r.w, r.h);
+		render.fillRectangle(mask & (1 << i) ? (cfg.mono ? monoRed : r.color) : white, r.x, r.y, r.w, r.h);
 	}
 	render.end();
 	lastMask = mask;
@@ -216,7 +218,7 @@ new Message({
 		const msg = this.read();
 		const s = { ...DEFAULTS };
 		msg.forEach((value, key) => {
-			const name = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset", HOURS: "hours" }[key];
+			const name = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset", HOURS: "hours", MONO: "mono" }[key];
 			if (name) s[name] = String(value);
 		});
 		try {

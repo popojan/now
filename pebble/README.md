@@ -10,13 +10,14 @@ The Now clock as a Pebble watchface for **Pebble Time 2** (emery) and **Pebble R
   the last two show local time (phone timezone, DST included), like the Wallpaper Engine version
 - the hour panel is a 12-hour dial: the lit area is the elapsed share of 12 hours, in 12-minute
   steps (10:00 lights 50/60); the `hours` setting 24 brings back hour 0–23 as a sum of weights
-- `origin`, `offset`, `P`, `N` and `hours` are set from the phone, see [Settings](#settings)
+- the `mono` setting lights every cell red, like `mono=1` on the web
+- `origin`, `offset`, `P`, `N`, `hours` and `mono` are set from the phone, see [Settings](#settings)
 
 ## Settings
 
 Open the watchface's settings in the Pebble phone app. The form (`src/pkjs/index.js`) sends
 `origin` (ISO 8601), `offset` (years), `P` and `N` (as on hraj.si/now: N ≥ P is taken mod P)
-and the hour panel (`12` or `24`) to the watch, which keeps them across restarts. In the emulator, `pebble emu-app-config
+the hour panel (`12` or `24`) and the colours (Mondrian or mono red) to the watch, which keeps them across restarts. In the emulator, `pebble emu-app-config
 --emulator emery` opens the same form in the browser.
 
 ## Build and run

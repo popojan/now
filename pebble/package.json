@@ -25,7 +25,8 @@
       "P",
       "N",
       "OFFSET",
-      "HOURS"
+      "HOURS",
+      "MONO"
     ],
     "resources": {
       "media": []

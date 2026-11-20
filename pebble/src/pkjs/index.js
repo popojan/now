@@ -1,5 +1,5 @@
-// Phone side: settings page (origin, offset, signature P and N, hour panel) sent to the watch.
-var DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12" };
+// Phone side: settings page (origin, offset, signature P and N, hour panel, colours) sent to the watch.
+var DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "12", mono: "0" };
 
 function load() {
 	try {
@@ -7,7 +7,8 @@ function load() {
 		return {
 			origin: s.origin || DEFAULTS.origin, P: s.P || DEFAULTS.P,
 			N: s.N || DEFAULTS.N, offset: s.offset || DEFAULTS.offset,
-			hours: s.hours === "24" ? "24" : "12"
+			hours: s.hours === "24" ? "24" : "12",
+			mono: s.mono === "1" ? "1" : "0"
 		};
 	} catch (e) {
 		return DEFAULTS;
@@ -39,11 +40,15 @@ function page(s) {
 		'<option value="12"' + (s.hours === "24" ? '' : ' selected') + '>12-hour dial: lit area = share of 12 h</option>' +
 		'<option value="24"' + (s.hours === "24" ? ' selected' : '') + '>24 hours: hour as a sum of weights</option>' +
 		'</select>' +
+		'<label>colours</label><select id="mono" style="width:100%;font-size:16px;padding:8px">' +
+		'<option value="0"' + (s.mono === "1" ? '' : ' selected') + '>Mondrian: yellow, red, blue, grey</option>' +
+		'<option value="1"' + (s.mono === "1" ? ' selected' : '') + '>Mono: every lit cell red</option>' +
+		'</select>' +
 		'<div id="err"></div><button id="save">Save</button>' +
 		'<script>' +
 		'function v(id){return document.getElementById(id).value.trim();}' +
 		'document.getElementById("save").onclick=function(){' +
-		'var s={origin:v("origin"),offset:v("offset"),P:v("P"),N:v("N"),hours:v("hours")},e="";' +
+		'var s={origin:v("origin"),offset:v("offset"),P:v("P"),N:v("N"),hours:v("hours"),mono:v("mono")},e="";' +
 		'if(isNaN(Date.parse(s.origin)))e="origin is not a valid date";' +
 		'else if(!/^-?\\d+$/.test(s.offset))e="offset must be an integer";' +
 		'else if(!/^\\d+$/.test(s.P)||s.P.replace(/^0+/,"")==="")e="P must be a positive integer";' +
@@ -56,7 +61,7 @@ function page(s) {
 }
 
 function send(s) {
-	Pebble.sendAppMessage({ ORIGIN: s.origin, P: s.P, N: s.N, OFFSET: s.offset, HOURS: s.hours || "12" },
+	Pebble.sendAppMessage({ ORIGIN: s.origin, P: s.P, N: s.N, OFFSET: s.offset, HOURS: s.hours || "12", MONO: s.mono || "0" },
 		function () { console.log("settings sent"); },
 		function (e) { console.log("settings send failed: " + JSON.stringify(e)); });
 }
