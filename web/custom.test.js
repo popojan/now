@@ -166,3 +166,17 @@ console.log('shape= ok');
     }
     console.log('one-minute cycle on 120 states ok');
 }
+
+// mod not dividing S (90 states, mod 60 shows sums 0..59): digits only for those sums
+{
+    const f = C.faceFromBits('1,2,4,6,12,15,20,30');
+    const c = context(f, 0, 0n, 1n, 0n);
+    let prev = null, repeats = 0;
+    for (let m = 0; m < 300; m++) {
+        const key = Array.from({ length: 60 }, (_, s) => C.faceState(c, m * 60000 + s * 1000, 1n, 1n, 60n).join('.')).join('|');
+        if (key === prev) repeats++;
+        prev = key;
+    }
+    assert.strictEqual(repeats, 0);
+    console.log('mod not dividing S ok');
+}

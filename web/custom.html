@@ -237,7 +237,9 @@ function buildOrdering(face) {
     if (isLegacy(face)) {
         const idx = {};
         face.cells.forEach((c, i) => idx[c[0]] = i);
-        return LEGACY.ordering.map(opts => opts.map(sub => sub.map(w => idx[w])));
+        const ord = LEGACY.ordering.map(opts => opts.map(sub => sub.map(w => idx[w])));
+        ord.legacy = true;
+        return ord;
     }
     if (n > 20) throw new Error("at most 20 cells");
     const bit = face.cells.map((c, i) => i).sort((i, j) => (face.cells[i][0] - face.cells[j][0]) || (i - j));
@@ -257,12 +259,12 @@ function buildOrdering(face) {
 // Mixed-radix digits of k pick one subset per state.  Most significant first:
 // non-power-of-2 counts, then powers of 2, each by count then state; for the
 // default face this is exactly index.html's base-3 / bit / bit-pair layout.
-// step > 1: only the sums shown (multiples of step) get digits, or a digit of an
+// Only the count sums a cycle shows (0, step, 2 step, ...) get digits, or a digit of an
 // unseen sum could be the only change between two cycles.
-function buildRadix(ordering, step = 1) {
+function buildRadix(ordering, step = 1, count = ordering.length) {
     const pow2 = m => (m & (m - 1)) === 0;
     const slots = [];
-    ordering.forEach((o, s) => { if (o.length > 1 && s % step === 0) slots.push([s, o.length]); });
+    ordering.forEach((o, s) => { if (o.length > 1 && s % step === 0 && s / step < count) slots.push([s, o.length]); });
     slots.sort((p, q) => (pow2(p[1]) - pow2(q[1])) || (p[1] - q[1]) || (p[0] - q[0]));
     const period = slots.reduce((acc, [, m]) => acc * BigInt(m), 1n);
     return { slots, period };
@@ -289,8 +291,10 @@ function faceState(ctx, nowMs, tickNum, tickDen, mod, wall = null) {
     const state = fdiv(ms * tickDen, tickNum * 1000n);
     const cycle = fdiv(state, mod), ord = wall === null ? fmod(state, mod) : BigInt(wall);
     // fewer states than S (minutes, hours): show the same share of the face when it divides evenly
-    const step = S % Number(mod) === 0 ? S / Number(mod) : 1;
-    const radix = step === 1 ? ctx.radix : ((ctx.radixes ??= {})[step] ??= buildRadix(ordering, step));
+    const m = Number(mod), step = S % m === 0 ? S / m : 1;
+    // index.html's face keeps all 60 digits when it shows 0..mod-1 (its hours=24 panel)
+    const all = m === S || (ordering.legacy && step === 1);
+    const radix = all ? ctx.radix : ((ctx.radixes ??= {})[m] ??= buildRadix(ordering, step, m));
     const k = fmod(cycle * P + N, radix.period);
     const sum = Number(ord) * step;
     return ordering[sum][choices(radix, k, S)[sum]];
