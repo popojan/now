@@ -27,9 +27,11 @@ faces follow `web/custom.html` (`bits=`, `mod=`).
   on all cells or off, and a faint unit grid that shows each weight as a count of squares. Add up
   the lit numbers: that's the second (on the 120 face, twice the second)
 - the `mono` setting draws every cell in one of two colours, lit and unlit, picked from the
-  64 the watch shows (previewed as the panel renders them); red on white like `mono=1` on the
-  web by default, or e.g. white on Mondrian black
-- `face`, `mod`, `origin`, `offset`, `P`, `N`, `hours`, `mono`, `lit`, `unlit`, `labels` and `grid` are set from the phone, see [Settings](#settings)
+  64 the watch shows (previewed as the panel renders them), plus the line colour (the margins
+  outside the grid stay black). Lines in a cell colour merge those cells: same as unlit leaves only
+  the lit shapes. Presets fill the three pickers, which stay editable: red on white (like `mono=1`
+  on the web, the default), white on Mondrian black, ink on paper, silhouette, blueprint
+- `face`, `mod`, `origin`, `offset`, `P`, `N`, `hours`, `mono`, `lit`, `unlit`, `line`, `labels` and `grid` are set from the phone, see [Settings](#settings)
 
 ## Settings
 

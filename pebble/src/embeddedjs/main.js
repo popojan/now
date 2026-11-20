@@ -233,7 +233,7 @@ function parseFace(text) {
 	return { W, H, cells, colors: colors.split("").map(Number) };
 }
 
-const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0", lit: "ff0000", unlit: "ffffff", labels: "lit", grid: "0", face: "", mod: "" };
+const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0", lit: "ff0000", unlit: "ffffff", line: "000000", labels: "lit", grid: "0", face: "", mod: "" };
 const P_MAX = 900719925474099; // keeps strMod(N, P) exact
 
 // String settings -> config with the face engine; throws on invalid input.
@@ -256,15 +256,15 @@ function parseConfig(s) {
 	return {
 		origin, P: big(P), N: big(strMod(s.N, P)), offset: bigStr(s.offset), // hraj.si: N >= P -> N % P
 		hours: s.hours, mono: s.mono === "1", // mono: every cell lit / unlit in one colour
-		lit: rgb(s.lit || DEFAULTS.lit), unlit: rgb(s.unlit || DEFAULTS.unlit),
+		lit: rgb(s.lit || DEFAULTS.lit), unlit: rgb(s.unlit || DEFAULTS.unlit), line: rgb(s.line || DEFAULTS.line),
 		labels: s.labels || DEFAULTS.labels, grid: s.grid === "1", // hints: cell weights, unit grid
 		mod, eng
 	};
 }
 // --- end core ---
 
-const KEYS = ["ORIGIN", "P", "N", "OFFSET", "HOURS", "MONO", "FACE", "MOD", "LIT", "UNLIT", "LABELS", "GRID"];
-const NAMES = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset", HOURS: "hours", MONO: "mono", LIT: "lit", UNLIT: "unlit", FACE: "face", MOD: "mod", LABELS: "labels", GRID: "grid" };
+const KEYS = ["ORIGIN", "P", "N", "OFFSET", "HOURS", "MONO", "FACE", "MOD", "LIT", "UNLIT", "LABELS", "GRID", "LINE"];
+const NAMES = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset", HOURS: "hours", MONO: "mono", LIT: "lit", UNLIT: "unlit", FACE: "face", MOD: "mod", LABELS: "labels", GRID: "grid", LINE: "line" };
 
 function loadSettings() {
 	try {
@@ -311,7 +311,8 @@ function hints(r, on) {
 		render.drawText(text, labelFont, isLight(c) ? black : white, x, y);
 	}
 }
-const monoColors = () => [render.makeColor(...cfg.lit), render.makeColor(...cfg.unlit)];
+// mono: lit, unlit and line colours; the margins outside the grid stay black like the bezel
+const monoColors = () => [cfg.lit, cfg.unlit, cfg.line].map(c => render.makeColor(...c));
 
 // Square units, gap g between cells and around the frame, centred with black margins.
 function layout(face) {
@@ -330,7 +331,7 @@ function layout(face) {
 	}));
 	return { GX, GY, GW, GH, rects, u, g };
 }
-let geo = layout(cfg.eng.face), [monoLit, monoUnlit] = monoColors();
+let geo = layout(cfg.eng.face), [monoLit, monoUnlit, monoLine] = monoColors();
 
 let digits = null, digitsK = "", lastMask = -1, full = true, mode = 0;
 
@@ -350,7 +351,7 @@ function draw(date) {
 	} else {
 		render.begin(GX, GY, GW, GH);
 	}
-	render.fillRectangle(frame, GX, GY, GW, GH);
+	render.fillRectangle(cfg.mono ? monoLine : frame, GX, GY, GW, GH);
 	for (let i = 0; i < rects.length; i++) {
 		const r = rects[i];
 		const on = mask & (1 << i);
@@ -398,7 +399,7 @@ new Message({
 		try {
 			cfg = parseConfig(s);
 			geo = layout(cfg.eng.face);
-			[monoLit, monoUnlit] = monoColors();
+			[monoLit, monoUnlit, monoLine] = monoColors();
 			localStorage.setItem("now", JSON.stringify(s));
 			full = true;
 			setMode(mode); // the face's S decides the minute panel's events

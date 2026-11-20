@@ -3,11 +3,18 @@
 var faceText = require("./face").faceText;
 
 var DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0",
-	lit: "ff0000", unlit: "ffffff", labels: "lit", grid: "0", bits: "", mod: "" };
+	lit: "ff0000", unlit: "ffffff", line: "000000", labels: "lit", grid: "0", bits: "", mod: "" };
 // How the panel shows the 64 colours (index r*16 + g*4 + b, 2 bits each), from pebble-tool's
 // screenshot colour correction (MIT)
 var PANEL = "000000001e410043870068ca2b4a2c27514f16638d007dce5e98605c9b7257a5a24cb4db8ee3918ee69e8aebc084f5f14a161b48274840488a2f6bcc564e365454544f67904180d0759a64759d7671a6a469b5dd9ee5949de7a09becc295f6f299353f983e5a9556948f74d29d5b4d9d60649a70999587d5afa072aea382abababa7bae2c9e89dc9eaa7c7f0c8c3f9f7e35462e25874e16aa3de83dce66e6be6727ce37fa7e194dff1aa86f1ad93efb5b8ecc3ebffeeabfff1b5fff6d3ffffff";
-var MONO_PRESETS = [["ff0000", "ffffff", "red on white (web mono=1)"], ["ffffff", "555555", "white on Mondrian black"]];
+// [lit, unlit, lines, name]: a preset only fills the three pickers, which stay editable
+var MONO_PRESETS = [
+	["ff0000", "ffffff", "000000", "red on white (web mono=1)"],
+	["ffffff", "555555", "000000", "white on Mondrian black"],
+	["000000", "ffffff", "aaaaaa", "ink on paper"],
+	["ffffff", "000000", "000000", "silhouette: only the lit area"],
+	["ffffff", "0000aa", "55aaff", "blueprint"]
+];
 var PRESETS = [
 	["", "Classic 6×10: 1, 2, 4, 6, 12, 15, 20 (60 s)"],
 	["1,2,4,6,9,12,20,30,36", "10×12: 1, 2, 4, 6, 9, 12, 20, 30, 36 (120)"]
@@ -88,11 +95,12 @@ function pageScript() {
 			box.appendChild(b);
 		})(i);
 	}
-	function grids() { grid("lit"); grid("unlit"); }
+	function grids() { grid("lit"); grid("unlit"); grid("line"); }
 	[].forEach.call(document.querySelectorAll("[data-lit]"), function (b) {
 		b.onclick = function () {
 			document.getElementById("lit").value = b.getAttribute("data-lit");
 			document.getElementById("unlit").value = b.getAttribute("data-unlit");
+			document.getElementById("line").value = b.getAttribute("data-line");
 			document.getElementById("mono").value = "1";
 			grids();
 		};
@@ -107,7 +115,7 @@ function pageScript() {
 	check();
 	document.getElementById("save").onclick = function () {
 		var s = { origin: v("origin"), offset: v("offset"), P: v("P"), N: v("N"), hours: v("hours"),
-			mono: v("mono"), lit: v("lit"), unlit: v("unlit"), labels: v("labels"), grid: v("grid"), bits: v("bits").replace(/\s+/g, ""), mod: v("mod") }, e = check();
+			mono: v("mono"), lit: v("lit"), unlit: v("unlit"), line: v("line"), labels: v("labels"), grid: v("grid"), bits: v("bits").replace(/\s+/g, ""), mod: v("mod") }, e = check();
 		if (e) {}
 		else if (isNaN(Date.parse(s.origin))) e = "origin is not a valid date";
 		else if (!/^-?\d+$/.test(s.offset)) e = "offset must be an integer";
@@ -169,10 +177,12 @@ function page(s) {
 		option("0", "Mondrian: yellow, red, blue, grey", s.mono) +
 		option("1", "Mono: two colours below", s.mono) + '</select>' +
 		'<div class="presets">' + MONO_PRESETS.map(function (p) {
-			return '<button type="button" data-lit="' + p[0] + '" data-unlit="' + p[1] + '">' + esc(p[2]) + '</button>';
+			return '<button type="button" data-lit="' + p[0] + '" data-unlit="' + p[1] + '" data-line="' + p[2] + '">' + esc(p[3]) + '</button>';
 		}).join("") + '</div>' +
 		'<label>mono: lit cells</label><input type="hidden" id="lit" value="' + esc(s.lit) + '"><div class="grid" id="lit-grid"></div>' +
 		'<label>mono: unlit cells</label><input type="hidden" id="unlit" value="' + esc(s.unlit) + '"><div class="grid" id="unlit-grid"></div>' +
+		'<label>mono: lines</label><input type="hidden" id="line" value="' + esc(s.line) + '"><div class="grid" id="line-grid"></div>' +
+		'<small>lines in a cell colour merge those cells: same as unlit leaves only the lit shapes</small>' +
 		'<small>as the panel shows them</small>' +
 		'<div id="err"></div><button id="save">Save</button>' +
 		'<script>(' + pageScript.toString() + ')();</script></body></html>';
@@ -196,7 +206,7 @@ function send(s) {
 		return;
 	}
 	Pebble.sendAppMessage({ ORIGIN: s.origin, P: s.P, N: s.N, OFFSET: s.offset, HOURS: s.hours || "auto",
-		MONO: s.mono || "0", LIT: s.lit || DEFAULTS.lit, UNLIT: s.unlit || DEFAULTS.unlit,
+		MONO: s.mono || "0", LIT: s.lit || DEFAULTS.lit, UNLIT: s.unlit || DEFAULTS.unlit, LINE: s.line || DEFAULTS.line,
 		LABELS: s.labels || DEFAULTS.labels, GRID: s.grid || DEFAULTS.grid, FACE: face, MOD: s.mod || "" },
 		function () { console.log("settings sent: face " + (face || "default")); },
 		function (e) { console.log("settings send failed: " + JSON.stringify(e)); });

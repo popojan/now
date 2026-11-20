@@ -32,7 +32,8 @@
       "LIT",
       "UNLIT",
       "LABELS",
-      "GRID"
+      "GRID",
+      "LINE"
     ],
     "resources": {
       "media": []

@@ -81,6 +81,8 @@ assert.throws(() => W.parseConfig({ ...ok, mod: "7" }), /divide/);
 assert.throws(() => W.parseConfig({ ...ok, hours: "13" }), /hours/);
 assert.throws(() => W.parseConfig({ ...ok, labels: "some" }), /labels/);
 assert.strictEqual(W.parseConfig({ ...ok, grid: "1" }).grid, true);
+assert.deepStrictEqual(W.parseConfig({ ...ok, line: "aaaaaa" }).line, [170, 170, 170]);
+assert.deepStrictEqual(W.parseConfig(ok).line, [0, 0, 0]);
 assert.throws(() => W.parseConfig({ ...ok, face: "2x2;2.0.0.2.1,2.0.1.2.1;00" }), /complete/);
 assert.throws(() => W.parseConfig({ ...ok, face: "2x2;2.0.0.2.1,1.0.1.1.1;00" }), /gap/);
 assert.strictEqual(W.parseConfig({ ...ok, mod: "30" }).mod, 30);
