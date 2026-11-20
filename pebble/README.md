@@ -17,6 +17,8 @@ faces follow `web/custom.html` (`bits=`, `mod=`).
 - flick the wrist to cycle seconds → minutes in the hour → hours (PebbleOS gives watchfaces
   no touch or buttons);
   the last two show local time (phone timezone, DST included), like the Wallpaper Engine version
+- the minute panel is the elapsed share of the hour, in steps of 1 h / S (whole minutes on the
+  default face, half minutes on the 120 face)
 - the hour panel follows the watch's 12/24h setting: a 12-hour dial (lit area = elapsed share
   of 12 hours, in steps of 12 h / S; 10:00 lights 50/60) or a 24-hour dial (share of the day,
   18:00 lights 3/4). The `hours` setting can fix either (`12`, `day`), or `24` brings back

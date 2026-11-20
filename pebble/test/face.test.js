@@ -56,14 +56,14 @@ for (const [bits, shape] of faces) {
 		const ctx = { S, ordering, radix, originMs: Date.parse(s.origin), offsetYears: BigInt(s.offset), P, N: BigInt(s.N) % P };
 		const mod = BigInt(s.mod || (S % 60 === 0 ? 60 : S));
 		const hour12 = (i >> 2) % 2 === 0, panel = s.hours === "auto" ? (hour12 ? "12" : "day") : s.hours;
-		const modes = [[1n, 1n, mod], [60n, 1n, 60n], panel === "24" ? [3600n, 1n, 24n] : [panel === "day" ? 86400n : 43200n, BigInt(S), BigInt(S)]];
+		const modes = [[1n, 1n, mod], [3600n, BigInt(S), BigInt(S)], panel === "24" ? [3600n, 1n, 24n] : [panel === "day" ? 86400n : 43200n, BigInt(S), BigInt(S)]];
 		const base = Date.parse("2026-11-20T12:00:00Z") + (rnd() - 0.5) * 4e11;
 		for (let mode = 0; mode < 3; mode++) for (let d = 0; d < 3; d++) {
 			const now = Math.floor(base + d * 37000);
 			const local = new Date(now);
 			const st = W.clockState(cfg.eng, now, cfg, mode, local, hour12);
 			const mask = W.shownMask(cfg.eng, st, W.cycleDigits(cfg.eng, st, cfg));
-			const wall = mode === 0 ? null : mode === 1 ? local.getMinutes() : panel === "24" ? local.getHours()
+			const wall = mode === 0 ? null : mode === 1 ? Math.floor((local.getMinutes() * 60 + local.getSeconds()) * S / 3600) : panel === "24" ? local.getHours()
 				: Math.floor(((panel === "day" ? local.getHours() : local.getHours() % 12) * 3600 + local.getMinutes() * 60 + local.getSeconds()) * S / (panel === "day" ? 86400 : 43200));
 			const want = C.faceState(ctx, now, ...modes[mode], wall).slice().sort((a, b) => a - b);
 			const got = face.cells.map((c, j) => j).filter(j => mask & (1 << j));

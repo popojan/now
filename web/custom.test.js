@@ -35,7 +35,7 @@ function context(face, origin, offset, P, N) {
 
 const face = C.parseFace(null, null);
 assert.strictEqual(C.buildRadix(C.buildOrdering(face)).period, CP);
-const modes = [[1n, 1n, 60n, 1n, 60n], [60n, 1n, 60n, 60n, 60n], [3600n, 1n, 24n, 3600n, 24n], [43200n, 60n, 60n, 720n, 60n], [86400n, 60n, 60n, 1440n, 60n]];
+const modes = [[1n, 1n, 60n, 1n, 60n], [3600n, 60n, 60n, 60n, 60n], [3600n, 1n, 24n, 3600n, 24n], [43200n, 60n, 60n, 720n, 60n], [86400n, 60n, 60n, 1440n, 60n]];
 let n = 0;
 for (let i = 0; i < 4000; i++) {
     const origin = Date.UTC(1970, 0, 1) + Math.floor(rnd() * 2e12);

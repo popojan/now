@@ -163,13 +163,13 @@ const engine = face => {
 const defaultMod = S => S % 60 === 0 ? 60 : S; // a full face is one minute when it can be
 
 // Display modes as on the web: [tick numerator, denominator (s), states per cycle]: seconds
-// (mod per cycle), minutes in the hour, and the hour panel: "12" a 12-hour dial (lit area =
+// (mod per cycle), minutes as the elapsed share of the hour (steps of 1 h / S), and the hour panel: "12" a 12-hour dial (lit area =
 // elapsed share of 12 h), "day" a 24-hour dial, "24" the hour 0-23 as a sum of weights.
 // "auto" follows the watch's 12/24h setting.
 const hourPanel = (cfg, hour12) => cfg.hours === "auto" ? (hour12 ? "12" : "day") : cfg.hours;
 function modeParams(S, cfg, mode, hour12) {
 	if (mode === 0) return [1, 1, cfg.mod || defaultMod(S)];
-	if (mode === 1) return [60, 1, 60];
+	if (mode === 1) return [3600, S, S];
 	const h = hourPanel(cfg, hour12);
 	return h === "24" ? [3600, 1, 24] : [h === "day" ? 86400 : 43200, S, S];
 }
@@ -185,7 +185,8 @@ function clockState(eng, nowMs, cfg, mode = 0, local = null, hour12 = true) {
 	const slots = eng.radix[key] ??= buildRadix(ordering, step, mod);
 	const ms = divmod(mul(big(nowMs - cfg.origin), big(den)), num * 1000).q;
 	const { q: cycle, r } = divmod(add(ms, mul(cfg.offset, big(31536000 * den / num))), mod);
-	const ord = mode === 0 || !local ? r : mode === 1 ? local.getMinutes() : num === 3600 ? local.getHours()
+	const ord = mode === 0 || !local ? r : mode === 1 ? Math.floor((local.getMinutes() * 60 + local.getSeconds()) * S / 3600)
+		: num === 3600 ? local.getHours()
 		: Math.floor(((num === 86400 ? local.getHours() : local.getHours() % 12) * 3600 +
 			local.getMinutes() * 60 + local.getSeconds()) * S / num);
 	return { slots, cycle, sum: ord * step, key: mode + ":" + num + ":" + str(cycle) };
@@ -333,14 +334,15 @@ function draw(date) {
 	lastMask = mask;
 }
 
-// Seconds mode needs secondchange; the other modes only change once a minute (saves battery).
+// Seconds mode needs secondchange, and so do minutes when S > 60 (sub-minute steps);
+// otherwise once a minute is enough (saves battery).
 const onTime = e => draw(e.date);
 let timeEvent = null;
 function setMode(m) {
 	mode = m;
 	digitsK = "";
 	lastMask = -1;
-	const ev = mode === 0 ? "secondchange" : "minutechange";
+	const ev = mode === 0 || (mode === 1 && cfg.eng.S > 60) ? "secondchange" : "minutechange";
 	if (ev !== timeEvent) {
 		if (timeEvent) watch.removeEventListener(timeEvent, onTime);
 		timeEvent = ev;
@@ -371,9 +373,8 @@ new Message({
 			geo = layout(cfg.eng.face);
 			[monoLit, monoUnlit] = monoColors();
 			localStorage.setItem("now", JSON.stringify(s));
-			digitsK = "";
 			full = true;
-			draw(new Date);
+			setMode(mode); // the face's S decides the minute panel's events
 			console.log("settings applied: " + JSON.stringify(s));
 		} catch (e) {
 			console.log("settings rejected: " + e.message);
