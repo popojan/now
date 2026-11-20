@@ -23,10 +23,13 @@ faces follow `web/custom.html` (`bits=`, `mod=`).
   of 12 hours, in steps of 12 h / S; 10:00 lights 50/60) or a 24-hour dial (share of the day,
   18:00 lights 3/4). The `hours` setting can fix either (`12`, `day`), or `24` brings back
   hour 0–23 as a sum of weights. A change of the watch's setting shows from the next minute
+- reading hints for newcomers, set separately: numbers (the cell weights) on lit cells (default),
+  on all cells or off, and a faint unit grid that shows each weight as a count of squares. Add up
+  the lit numbers: that's the second (on the 120 face, twice the second)
 - the `mono` setting draws every cell in one of two colours, lit and unlit, picked from the
   64 the watch shows (previewed as the panel renders them); red on white like `mono=1` on the
   web by default, or e.g. white on Mondrian black
-- `face`, `mod`, `origin`, `offset`, `P`, `N`, `hours`, `mono`, `lit` and `unlit` are set from the phone, see [Settings](#settings)
+- `face`, `mod`, `origin`, `offset`, `P`, `N`, `hours`, `mono`, `lit`, `unlit`, `labels` and `grid` are set from the phone, see [Settings](#settings)
 
 ## Settings
 

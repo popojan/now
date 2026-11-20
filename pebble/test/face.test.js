@@ -79,6 +79,8 @@ console.log(`core vs web/custom.html (TZ=${process.env.TZ || "system"}): ${n} ch
 const ok = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0", face: "", mod: "" };
 assert.throws(() => W.parseConfig({ ...ok, mod: "7" }), /divide/);
 assert.throws(() => W.parseConfig({ ...ok, hours: "13" }), /hours/);
+assert.throws(() => W.parseConfig({ ...ok, labels: "some" }), /labels/);
+assert.strictEqual(W.parseConfig({ ...ok, grid: "1" }).grid, true);
 assert.throws(() => W.parseConfig({ ...ok, face: "2x2;2.0.0.2.1,2.0.1.2.1;00" }), /complete/);
 assert.throws(() => W.parseConfig({ ...ok, face: "2x2;2.0.0.2.1,1.0.1.1.1;00" }), /gap/);
 assert.strictEqual(W.parseConfig({ ...ok, mod: "30" }).mod, 30);

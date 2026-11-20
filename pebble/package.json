@@ -30,7 +30,9 @@
       "FACE",
       "MOD",
       "LIT",
-      "UNLIT"
+      "UNLIT",
+      "LABELS",
+      "GRID"
     ],
     "resources": {
       "media": []

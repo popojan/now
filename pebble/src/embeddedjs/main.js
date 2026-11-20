@@ -233,7 +233,7 @@ function parseFace(text) {
 	return { W, H, cells, colors: colors.split("").map(Number) };
 }
 
-const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0", lit: "ff0000", unlit: "ffffff", face: "", mod: "" };
+const DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0", lit: "ff0000", unlit: "ffffff", labels: "lit", grid: "0", face: "", mod: "" };
 const P_MAX = 900719925474099; // keeps strMod(N, P) exact
 
 // String settings -> config with the face engine; throws on invalid input.
@@ -248,6 +248,7 @@ function parseConfig(s) {
 	const eng = engine(parseFace(s.face || ""));
 	const mod = s.mod ? Number(s.mod) : 0;
 	if (s.mod && !(/^\d+$/.test(s.mod) && mod >= 1 && eng.S % mod === 0)) throw new Error("mod must divide " + eng.S);
+	if (!["off", "lit", "all"].includes(s.labels || "lit")) throw new Error("labels must be off, lit or all");
 	const rgb = hex => {
 		if (!/^[0-9a-fA-F]{6}$/.test(hex)) throw new Error("colours are rrggbb");
 		return [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
@@ -256,13 +257,14 @@ function parseConfig(s) {
 		origin, P: big(P), N: big(strMod(s.N, P)), offset: bigStr(s.offset), // hraj.si: N >= P -> N % P
 		hours: s.hours, mono: s.mono === "1", // mono: every cell lit / unlit in one colour
 		lit: rgb(s.lit || DEFAULTS.lit), unlit: rgb(s.unlit || DEFAULTS.unlit),
+		labels: s.labels || DEFAULTS.labels, grid: s.grid === "1", // hints: cell weights, unit grid
 		mod, eng
 	};
 }
 // --- end core ---
 
-const KEYS = ["ORIGIN", "P", "N", "OFFSET", "HOURS", "MONO", "FACE", "MOD", "LIT", "UNLIT"];
-const NAMES = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset", HOURS: "hours", MONO: "mono", LIT: "lit", UNLIT: "unlit", FACE: "face", MOD: "mod" };
+const KEYS = ["ORIGIN", "P", "N", "OFFSET", "HOURS", "MONO", "FACE", "MOD", "LIT", "UNLIT", "LABELS", "GRID"];
+const NAMES = { ORIGIN: "origin", P: "P", N: "N", OFFSET: "offset", HOURS: "hours", MONO: "mono", LIT: "lit", UNLIT: "unlit", FACE: "face", MOD: "mod", LABELS: "labels", GRID: "grid" };
 
 function loadSettings() {
 	try {
@@ -283,8 +285,32 @@ const ROUND = W === H && W >= 260; // gabbro (Round 2): fit the grid inside the 
 const bg = render.makeColor(0, 0, 0); // blends with the grid frame and the bezel
 const frame = render.makeColor(0, 0, 0);
 const white = render.makeColor(255, 255, 255);
+const black = render.makeColor(0, 0, 0);
 // custom.html's PALETTE: yellow, red, blue, dark (#303030 there, kept apart from the frame here)
 const PALETTE = [render.makeColor(255, 255, 0), render.makeColor(255, 0, 0), render.makeColor(0, 0, 255), render.makeColor(85, 85, 85)];
+// Hints for learning to read the face: the weight on lit (or all) cells, and a unit grid.
+// Text and grid lines contrast with the fill: black on light, white on dark.
+const RGB = [[255, 255, 0], [255, 0, 0], [0, 0, 255], [85, 85, 85]], WHITE = [255, 255, 255], BLACK = [0, 0, 0];
+const labelFont = new render.Font("Gothic-Bold", 14);
+const cellRGB = (r, on) => cfg.mono ? (on ? cfg.lit : cfg.unlit) : on ? RGB[r.pi] : WHITE;
+const isLight = c => c[0] + c[1] + c[2] > 382;
+// one Pebble colour step from the fill: bright channels darker, a dark grey to black
+const faint = c => render.makeColor(...(c.every(v => v <= 85) ? BLACK : c.map(v => v === 255 ? 170 : v)));
+function hints(r, on) {
+	const c = cellRGB(r, on);
+	if (cfg.grid) {
+		const color = faint(c), step = geo.u + geo.g, at = (geo.g >> 1) - geo.g;
+		for (let k = 1; k < r.cs; k++) render.fillRectangle(color, r.x + k * step + at, r.y, 1, r.h);
+		for (let k = 1; k < r.rs; k++) render.fillRectangle(color, r.x, r.y + k * step + at, r.w, 1);
+	}
+	if (cfg.labels === "all" || (cfg.labels === "lit" && on)) {
+		const text = String(r.wt), tw = render.getTextWidth(text, labelFont);
+		// top left; narrow cells centre it across, the unit cell both ways
+		const x = r.w < 30 ? r.x + ((r.w - tw) >> 1) : r.x + 4;
+		const y = r.w < 30 && r.h < 30 ? r.y + ((r.h - labelFont.height) >> 1) - 1 : r.y + 1;
+		render.drawText(text, labelFont, isLight(c) ? black : white, x, y);
+	}
+}
 const monoColors = () => [render.makeColor(...cfg.lit), render.makeColor(...cfg.unlit)];
 
 // Square units, gap g between cells and around the frame, centred with black margins.
@@ -298,11 +324,11 @@ function layout(face) {
 	const GW = face.W * u + (face.W + 1) * g, GH = face.H * u + (face.H + 1) * g;
 	const GX = (W - GW) >> 1, GY = (H - GH) >> 1;
 	const rects = face.cells.map(([w, c, r, cs, rs], i) => ({
-		color: PALETTE[face.colors[i]],
+		color: PALETTE[face.colors[i]], pi: face.colors[i], wt: w, cs, rs,
 		x: GX + g + c * (u + g), y: GY + g + r * (u + g),
 		w: cs * u + (cs - 1) * g, h: rs * u + (rs - 1) * g
 	}));
-	return { GX, GY, GW, GH, rects };
+	return { GX, GY, GW, GH, rects, u, g };
 }
 let geo = layout(cfg.eng.face), [monoLit, monoUnlit] = monoColors();
 
@@ -329,6 +355,7 @@ function draw(date) {
 		const r = rects[i];
 		const on = mask & (1 << i);
 		render.fillRectangle(cfg.mono ? (on ? monoLit : monoUnlit) : on ? r.color : white, r.x, r.y, r.w, r.h);
+		hints(r, on);
 	}
 	render.end();
 	lastMask = mask;

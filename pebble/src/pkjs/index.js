@@ -3,7 +3,7 @@
 var faceText = require("./face").faceText;
 
 var DEFAULTS = { origin: "1970-01-01T00:00:00Z", P: "1", N: "0", offset: "0", hours: "auto", mono: "0",
-	lit: "ff0000", unlit: "ffffff", bits: "", mod: "" };
+	lit: "ff0000", unlit: "ffffff", labels: "lit", grid: "0", bits: "", mod: "" };
 // How the panel shows the 64 colours (index r*16 + g*4 + b, 2 bits each), from pebble-tool's
 // screenshot colour correction (MIT)
 var PANEL = "000000001e410043870068ca2b4a2c27514f16638d007dce5e98605c9b7257a5a24cb4db8ee3918ee69e8aebc084f5f14a161b48274840488a2f6bcc564e365454544f67904180d0759a64759d7671a6a469b5dd9ee5949de7a09becc295f6f299353f983e5a9556948f74d29d5b4d9d60649a70999587d5afa072aea382abababa7bae2c9e89dc9eaa7c7f0c8c3f9f7e35462e25874e16aa3de83dce66e6be6727ce37fa7e194dff1aa86f1ad93efb5b8ecc3ebffeeabfff1b5fff6d3ffffff";
@@ -107,7 +107,7 @@ function pageScript() {
 	check();
 	document.getElementById("save").onclick = function () {
 		var s = { origin: v("origin"), offset: v("offset"), P: v("P"), N: v("N"), hours: v("hours"),
-			mono: v("mono"), lit: v("lit"), unlit: v("unlit"), bits: v("bits").replace(/\s+/g, ""), mod: v("mod") }, e = check();
+			mono: v("mono"), lit: v("lit"), unlit: v("unlit"), labels: v("labels"), grid: v("grid"), bits: v("bits").replace(/\s+/g, ""), mod: v("mod") }, e = check();
 		if (e) {}
 		else if (isNaN(Date.parse(s.origin))) e = "origin is not a valid date";
 		else if (!/^-?\d+$/.test(s.offset)) e = "offset must be an integer";
@@ -136,6 +136,16 @@ function page(s) {
 		'.grid button.sw.on{outline:3px solid #1e1e1e;outline-offset:1px;position:relative}' +
 		'.presets button{margin-top:6px;font-size:15px;padding:8px;background:#555}' +
 		'</style></head><body data-panel="' + PANEL + '"><h2>Now</h2>' +
+		'<label>reading hints</label><select id="labels" ' + sel + '>' +
+		option("lit", "Numbers on lit cells", s.labels) +
+		option("all", "Numbers on all cells", s.labels) +
+		option("off", "No numbers", s.labels) + '</select>' +
+		'<select id="grid" style="width:100%;font-size:16px;padding:8px;margin-top:6px">' +
+		option("0", "No grid", s.grid) +
+		option("1", "Faint unit grid: a cell\'s weight is its number of squares", s.grid) + '</select>' +
+		'<small>Add up the numbers on the coloured cells: that is the second, out of 60. ' +
+		'On a 120 face it is twice the second. Minutes and hours show the elapsed share of the hour ' +
+		'and of 12 or 24 hours. Turn the hints off once you can read it.</small>' +
 		'<label>face</label><select id="preset" ' + sel + '>' +
 		PRESETS.map(function (p) { return option(p[0], p[1], s.bits); }).join("") +
 		option("-", "Own weights…", known ? "" : "-") + '</select>' +
@@ -186,7 +196,8 @@ function send(s) {
 		return;
 	}
 	Pebble.sendAppMessage({ ORIGIN: s.origin, P: s.P, N: s.N, OFFSET: s.offset, HOURS: s.hours || "auto",
-		MONO: s.mono || "0", LIT: s.lit || DEFAULTS.lit, UNLIT: s.unlit || DEFAULTS.unlit, FACE: face, MOD: s.mod || "" },
+		MONO: s.mono || "0", LIT: s.lit || DEFAULTS.lit, UNLIT: s.unlit || DEFAULTS.unlit,
+		LABELS: s.labels || DEFAULTS.labels, GRID: s.grid || DEFAULTS.grid, FACE: face, MOD: s.mod || "" },
 		function () { console.log("settings sent: face " + (face || "default")); },
 		function (e) { console.log("settings send failed: " + JSON.stringify(e)); });
 }
